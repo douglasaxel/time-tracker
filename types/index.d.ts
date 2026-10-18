@@ -7,6 +7,9 @@ export type Days = Record<string, Record<string, Interval[]>>
 /** What a session writes to `$.store` under `session:<sessionId>`. */
 export type SessionRecord = { days: Days }
 
+/** What `$.store` holds under `day:<YYYY-MM-DD>` for a closed day: project path -> ms worked, all sessions united. */
+export type DayTotals = Record<string, number>
+
 /** The activity in progress: from `start` to the last active instant `last`. */
 export type Live = { project: string; start: number; last: number }
 

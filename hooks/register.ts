@@ -3,16 +3,14 @@
 // every hook passes `next(e)` on unchanged.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
-import type { Rec, SessionRecord } from '../types'
+import type { Days, Rec, SessionRecord } from '../types'
 import { isPortuguese, type Lang } from './i18n'
 import { statusText } from './status'
-import { MIN, expire, touch, withLive } from './time'
+import { ledger, sessionKey } from './ledger'
+import { MIN, dayKey, expire, touch, withLive } from './time'
 
 const empty: Rec = { id: null, days: {}, live: null, turns: [] }
 const recAtom = atom({ plugin: 'time-tracker', key: 'rec' } as const, empty)
-
-/** Store layout: each session writes only its own key. */
-const sessionKey = (id: string) => `session:${id}`
 
 // Module variables reset on every load; register and session.start set them again.
 let idleMs = 10 * MIN
@@ -64,7 +62,8 @@ async function ensureSession($: EngineInterface) {
   if ((await read($, recAtom)).id) return
   const id = await $.session.id()
   const stored = (await $.store.get(sessionKey(id))) as SessionRecord | undefined
-  await update($, recAtom, r => (r.id ? r : { ...empty, id, days: stored?.days ?? {} }))
+  const rec = await update($, recAtom, r => (r.id ? r : { ...empty, id, days: stored?.days ?? {} }))
+  await quiet(sync($, rec, await $.clock.now()))
 }
 
 async function persist($: EngineInterface, rec: Rec) {
@@ -77,7 +76,7 @@ async function persist($: EngineInterface, rec: Rec) {
 }
 
 async function showStatus($: EngineInterface, rec: Rec, now: number) {
-  $.ui.status(statusText(rec, now, rec.live?.project ?? (await project($)), lang))
+  $.ui.status(statusText(rec, now, rec.live?.project ?? (await project($)), lang, others))
 }
 
 /** An active instant now: a prompt, a step's start or end, a turn's start or end. */
@@ -100,8 +99,26 @@ async function tick($: EngineInterface) {
   const p = busy ? await project($) : ''
   const rec = await update($, recAtom, r => (busy ? touch(r, now, p, idleMs) : expire(r, now, idleMs)))
   await persist($, rec)
+  await quiet(sync($, rec, now))
   await showStatus($, rec, now)
 }
+
+// ---- #4: sessions in parallel and compaction (logic in ledger.ts) ----
+/** The other sessions' days, read from the store when a session id binds and each minute. */
+let others: Days = {}
+
+/** Reads every session and closed-day key, compacts the closed days, and refreshes `others`. */
+async function sync($: EngineInterface, rec: Rec, now: number) {
+  const entries: Record<string, unknown> = {}
+  for (const k of await $.store.keys()) if (/^(session|day):/.test(k)) entries[k] = await $.store.get(k)
+  const own = rec.id ? sessionKey(rec.id) : ''
+  if (own) entries[own] = { days: withLive(rec.days, rec.live) }
+  const plan = ledger(entries, own, dayKey(now - idleMs - MIN))
+  for (const [k, v] of plan.set) await $.store.set(k, v)
+  for (const k of plan.remove) await $.store.delete(k)
+  others = plan.others
+}
+// ---- end #4 ----
 
 // --- #7 background work: while any background task of the session runs, the session counts as active.
 // classic.Stop lists the work still in flight at each main-turn end; when a task ends it wakes the
