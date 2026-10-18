@@ -23,6 +23,10 @@ export type Rec = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'time-tracker': { rec: Rec }
+    'time-tracker': {
+      rec: Rec
+      /** Folder paths collapsed in the /horas panel. */
+      collapsed: string[]
+    }
   }
 }

@@ -4,12 +4,15 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { Rec, SessionRecord } from '../types'
-import { isPortuguese, type Lang } from './i18n'
+import { isPortuguese, strings, type Lang } from './i18n'
+import { panel } from './panel'
 import { statusText } from './status'
 import { MIN, expire, touch, withLive } from './time'
+import { buildTree, projectTotals } from './tree'
 
 const empty: Rec = { id: null, days: {}, live: null, turns: [] }
 const recAtom = atom({ plugin: 'time-tracker', key: 'rec' } as const, empty)
+const PANE = 'time-tracker' // the /horas panel (#3)
 
 /** Store layout: each session writes only its own key. */
 const sessionKey = (id: string) => `session:${id}`
@@ -93,6 +96,7 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     await quiet((async () => {
       lang = await detectLang($, options.language)
+      await quiet($.command.register({ name: 'horas', description: strings[lang].paneHint })) // /horas panel (#3)
       await ensureSession($)
       await showStatus($, await read($, recAtom), await $.clock.now())
     })())
@@ -133,4 +137,27 @@ export const register: Register = (on, options) => {
     await quiet(activity($, { turnEnd: turnKey(e) }))
     return next(e)
   })
+
+  // --- /horas panel (#3): the command toggles the pane; the drawing reads the record, so each tick redraws it.
+  const collapsed = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
+
+  on('command.run', { command: 'horas' }, async $ => {
+    if ((await $.ui.panes()).some(p => p.id === PANE)) {
+      await $.ui.close({ id: PANE })
+      return { text: strings[lang].closed }
+    }
+    await $.ui.open({ id: PANE, title: strings[lang].pane })
+    return { text: strings[lang].opened }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const rec = await read($, recAtom)
+    return panel($.ui.resolve(e), {
+      roots: buildTree(projectTotals(withLive(rec.days, rec.live))),
+      collapsed: await read($, collapsed),
+      lang,
+      onToggle: path => update($, collapsed, c => (c.includes(path) ? c.filter(p => p !== path) : [...c, path])),
+    })
+  })
+  // --- end /horas panel
 }
