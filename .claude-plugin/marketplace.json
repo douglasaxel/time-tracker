@@ -9,7 +9,7 @@
     {
       "name": "time-tracker",
       "source": "./",
-      "description": "Measures time worked per project and shows today's time in the status line."
+      "description": "Measures time worked per project, shows today's time in the status line, and opens the /horas panel with the time per folder and day."
     }
   ]
 }

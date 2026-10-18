@@ -1,7 +1,7 @@
 {
   "name": "time-tracker",
   "version": "0.1.0",
-  "description": "Measures the time worked on each project with Claude Code and shows today's time in the status line.",
+  "description": "Measures the time worked on each project with Claude Code, shows today's time in the status line, and opens the /horas panel with the time per folder and day, corrections and a Markdown copy for hours reports.",
   "author": {
     "name": "douglasaxel",
     "url": "https://github.com/douglasaxel"
@@ -10,7 +10,7 @@
   "userConfig": {
     "idleMinutes": {
       "type": "number",
-      "title": "Idle limit (minutes)",
+      "title": "Inactivity limit (minutes)",
       "description": "The longest gap between interactions that still counts as time worked",
       "default": 10
     },

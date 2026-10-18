@@ -1,5 +1,5 @@
 // The time model: pure functions over intervals, days and the session record. No `$` here.
-import type { Days, Filter, Interval, Live, Rec } from '../types'
+import type { Days, Filter, Interval, Live, SessionMeasurement } from '../types'
 
 export const MIN = 60_000
 
@@ -60,33 +60,42 @@ export function addInterval(days: Days, project: string, start: number, end: num
 export const withLive = (days: Days, live: Live | null): Days =>
   live && live.last > live.start ? addInterval(days, live.project, live.start, live.last) : days
 
+/** The session's days up to now: its closed intervals and the activity in progress. */
+export const liveDays = (m: SessionMeasurement): Days => withLive(m.days, m.live)
+
+/** An instant of the session: when, in which project, and the inactivity limit in force. */
+export type Moment = { now: number; project: string; inactivityMs: number }
+
 /**
- * An active instant at `now` in `project`. A gap since the last active instant up to the
- * idle limit is a short pause and counts; a longer gap starts a new activity. Another project
- * (a /cd) within the limit closes the old project's activity at `now` and opens the new one there.
+ * An active instant. A gap since the last active instant up to the inactivity limit is a short
+ * pause and counts; a longer gap starts a new activity. Another project (a /cd) within the limit
+ * closes the old project's activity at `now` and opens the new one there.
  */
-export function touch(rec: Rec, now: number, project: string, idleMs: number): Rec {
-  const { live } = rec
-  const isOn = live && now >= live.last && now - live.last <= idleMs
-  if (isOn && live.project === project) return { ...rec, live: { ...live, last: now } }
+export function touch(m: SessionMeasurement, { now, project, inactivityMs }: Moment): SessionMeasurement {
+  const { live } = m
+  const isOn = live && now >= live.last && now - live.last <= inactivityMs
+  if (isOn && live.project === project) return { ...m, live: { ...live, last: now } }
   const ended = isOn ? { ...live, last: now } : live
-  return { ...rec, days: withLive(rec.days, ended), live: { project, start: now, last: now } }
+  return { ...m, days: withLive(m.days, ended), live: { project, start: now, last: now } }
 }
 
-/** A manual pause at `now`: the activity in progress closes at that moment. */
-export function pause(rec: Rec, now: number, project: string, idleMs: number): Rec {
-  const r = touch(rec, now, project, idleMs)
-  return { ...r, days: withLive(r.days, r.live), live: null }
+/** A manual pause starting at this moment: the activity in progress closes there. */
+export function startManualPause(m: SessionMeasurement, at: Moment): SessionMeasurement {
+  const r = touch(m, at)
+  return { ...r, days: liveDays(r), live: null }
 }
 
-/** With no activity for longer than the idle limit, the activity ends at its last active instant. */
-export function expire(rec: Rec, now: number, idleMs: number): Rec {
-  if (!rec.live || now - rec.live.last <= idleMs) return rec
-  return { ...rec, days: withLive(rec.days, rec.live), live: null }
+/** With no activity for longer than the inactivity limit, the activity ends at its last active instant. */
+export function expire(m: SessionMeasurement, now: number, inactivityMs: number): SessionMeasurement {
+  if (!m.live || now - m.live.last <= inactivityMs) return m
+  return { ...m, days: liveDays(m), live: null }
 }
 
 /** `Xh MMmin`, never rounded up. */
-export function fmt(ms: number): string {
+export function formatDuration(ms: number): string {
   const m = Math.floor(ms / MIN)
   return `${Math.floor(m / 60)}h ${pad(m % 60)}min`
 }
+
+/** The items' times summed, as `Xh MMmin`. */
+export const formatTotal = (items: readonly { total: number }[]) => formatDuration(items.reduce((t, i) => t + i.total, 0))

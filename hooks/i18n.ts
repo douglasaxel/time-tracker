@@ -17,7 +17,7 @@ export const strings = {
     empty: 'No time worked yet. Time counts while you work with Claude in a project.',
     // Days and filters.
     noTime: 'No time worked in this period.',
-    pickHint: 'Press a time to see its days.',
+    pickHint: "Press a folder's name or time to see its days.",
     // Manual pause.
     pause: '⏸ Pause',
     resume: '▶ Resume',
@@ -45,7 +45,7 @@ export const strings = {
     total: 'Total',
     empty: 'Nenhum tempo trabalhado ainda. O tempo conta enquanto você trabalha com o Claude num projeto.',
     noTime: 'Nenhum tempo trabalhado neste período.',
-    pickHint: 'Pressione um tempo para ver os dias dele.',
+    pickHint: 'Pressione o nome ou o tempo de uma pasta para ver os dias dela.',
     pause: '⏸ Pausar',
     resume: '▶ Retomar',
     paused: 'Em pausa: esta sessão não está contando tempo.',
@@ -65,15 +65,17 @@ export const strings = {
 
 export const filters: Record<Lang, Record<Filter, string>> = {
   en: { today: 'Today', week: 'Week', month: 'Month', all: 'All' },
-  pt: { today: 'Hoje', week: 'Semana', month: 'Mês', all: 'Total' },
+  pt: { today: 'Hoje', week: 'Semana', month: 'Mês', all: 'Tudo' },
 }
 
 const weekdays = { en: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], pt: ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'] }
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** A day key as a row reads it: `seg 12/10` or `Mon Oct 12`. */
-export function dayLabel(day: string, lang: Lang): string {
+/** A day key as a row reads it: `seg 12/10` or `Mon Oct 12`; with the year, `seg 12/10/2026` or `Mon Oct 12, 2026`. */
+export function dayLabel(day: string, lang: Lang, withYear = false): string {
   const d = new Date(`${day}T00:00`) // no offset: local time
   const wd = weekdays[lang][d.getDay()]
-  return lang === 'pt' ? `${wd} ${day.slice(8)}/${day.slice(5, 7)}` : `${wd} ${months[d.getMonth()]} ${d.getDate()}`
+  const year = day.slice(0, 4)
+  if (lang === 'pt') return `${wd} ${day.slice(8)}/${day.slice(5, 7)}${withYear ? `/${year}` : ''}`
+  return `${wd} ${months[d.getMonth()]} ${d.getDate()}${withYear ? `, ${year}` : ''}`
 }

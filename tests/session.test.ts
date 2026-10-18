@@ -34,7 +34,10 @@ function world(on: On, start: number, store: Record<string, unknown> = {}, isEnv
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('classic.Stop', () => ({}))
-  return { clock, statuses, session, store, files, status: () => statuses.at(-1) }
+  /** The session's subagents, as `$.agent.list()` answers. */
+  const agents: { id: string; description: string; type: string; status: 'running' | 'completed' }[] = []
+  on('agent.list', () => ({ value: agents }))
+  return { clock, statuses, session, store, files, agents, status: () => statuses.at(-1) }
 }
 
 const startSession = ($: TestEngine) => $.session.start({ cwd: 'C:/work/room/app-a', surface: 'terminal', isInteractive: true })
@@ -60,7 +63,7 @@ test('a short pause between interactions counts as time worked', { options: { la
   expect(w.status()).toBe('⏱ 0h 20min hoje · app-a')
 })
 
-test('a gap longer than the idle limit does not count', { options: { language: 'pt' } }, async ($, on) => {
+test('a gap longer than the inactivity limit does not count', { options: { language: 'pt' } }, async ($, on) => {
   const w = world(on, at(9, 0))
   await startSession($)
   await interact($, w, 't1', 5)
@@ -70,7 +73,7 @@ test('a gap longer than the idle limit does not count', { options: { language: '
   expect(w.status()).toBe('⏱ 0h 10min hoje · app-a')
 })
 
-test('the idle limit comes from the options', { options: { language: 'pt', idleMinutes: 20 } }, async ($, on) => {
+test('the inactivity limit comes from the options', { options: { language: 'pt', idleMinutes: 20 } }, async ($, on) => {
   const w = world(on, at(9, 0))
   await startSession($)
   await interact($, w, 't1', 5)
@@ -175,7 +178,7 @@ test('a /cd while Claude answers moves the time on the next minute', { options: 
   expect(w.status()).toBe('⏱ 0h 04min hoje · app-a')
 })
 
-test('a session in a worktree records its time in the main repository', { options: { language: 'pt' } }, async ($, on) => {
+test('a session in a worktree records its time in the original repository', { options: { language: 'pt' } }, async ($, on) => {
   const w = world(on, at(9, 0))
   w.session.root = 'C:\\work\\room\\app-a\\.claude\\worktrees\\wt'
   w.files['C:/work/room/app-a/.claude/worktrees/wt/.git'] = 'gitdir: C:/work/room/app-a/.git/worktrees/wt\n'
@@ -236,7 +239,7 @@ test('closed days become one total per project and day, and old session keys go'
   expect(w.status()).toBe('⏱ 0h 15min hoje · app-a')
 })
 
-test('a day is not closed until the idle limit has passed after midnight', { options: { language: 'pt' } }, async ($, on) => {
+test('a day is not closed until the inactivity limit has passed after midnight', { options: { language: 'pt' } }, async ($, on) => {
   const w = world(on, at(0, 5), { 'session:sess-0': other(['app-a', yesterday(23, 50), at(0, 0)]) })
   await startSession($)
   expect(Object.keys(w.store)).toEqual(['session:sess-0'])
@@ -255,15 +258,17 @@ test('compacting again, or by two sessions at once, keeps the same total', { opt
   expect(w.store).toEqual({ 'day:2026-10-17': { 'C:/work/room/app-a': 90 * MIN }, 'session:sess-1': { days: {} } })
 })
 
-test('background work keeps the session active, and the idle limit runs from its end', { options: { language: 'pt' } }, async ($, on) => {
+test('background work keeps the session active, and the inactivity limit runs from its end', { options: { language: 'pt' } }, async ($, on) => {
   const w = world(on, at(9, 0))
   await startSession($)
   await interact($, w, 't1', 1)
+  w.agents.push({ id: 'a1', description: 'review', type: 'general-purpose', status: 'running' })
   await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'subagent', status: 'running', description: 'review' }] })
   await w.clock.advance(30 * MIN)
   expect(w.status()).toBe('⏱ 0h 31min hoje · app-a')
 
   // The task ends and wakes the session; its turn ends with nothing left in background.
+  w.agents[0]!.status = 'completed'
   await $.prompt.submit({ text: 'done', wait: false, origin: { kind: 'task-notification' } })
   await $.turn.start({ text: 'done', turnId: 't2' })
   await $.turn.complete({ answer: 'ok', durationMs: 0, isAborted: false, turnId: 't2', reason: 'answer' })
@@ -274,3 +279,31 @@ test('background work keeps the session active, and the idle limit runs from its
   await w.clock.advance(15 * MIN)
   expect(w.status()).toBe('⏱ 0h 41min hoje · app-a')
 })
+
+test('background work nobody confirms stops counting after the inactivity limit', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  await startSession($)
+  await interact($, w, 't1', 1)
+  // A background shell is listed at 09:01, and no later Stop lists it again; no subagent runs.
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'build' }] })
+  await w.clock.advance(30 * MIN)
+  expect(w.status()).toBe('⏱ 0h 11min hoje · app-a')
+})
+
+test('a worktree whose gitdir is relative records its time in the original repository', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  w.session.root = 'C:/work/room/app-a/.claude/worktrees/wt'
+  w.files['C:/work/room/app-a/.claude/worktrees/wt/.git'] = 'gitdir: ../../../.git/worktrees/wt\n'
+  await startSession($)
+  await interact($, w, 't1', 5)
+  expect(w.status()).toBe('⏱ 0h 05min hoje · app-a')
+})
+
+for (const [name, minutes, shown] of [['added', 10, '0h 15min'], ['subtracted below zero', -30, '0h 00min']] as const) {
+  test(`the status line counts today's corrections: ${name}`, { options: { language: 'pt' } }, async ($, on) => {
+    const w = world(on, at(9, 0), { 'fix:2026-10-18': { 'C:/work/room/app-a': minutes * MIN } })
+    await startSession($)
+    await interact($, w, 't1', 5)
+    expect(w.status()).toBe(`⏱ ${shown} hoje · app-a`)
+  })
+}

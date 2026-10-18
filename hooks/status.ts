@@ -1,13 +1,8 @@
 // The status line text: `⏱ <time today> today · <project folder>`, `⏸` while paused. Pure.
-import type { Days, Rec } from '../types'
 import { strings, type Lang } from './i18n'
-import { dayKey, fmt, total, withLive } from './time'
+import { formatDuration } from './time'
+import { folderName } from './tree'
 
-export const folderName = (project: string) => project.split('/').filter(Boolean).at(-1) ?? project
-
-/** Today's time worked in `project`: this session's intervals united with the other sessions' `others`. */
-export function statusText(rec: Rec, now: number, project: string, lang: Lang, others: Days = {}, paused = false): string {
-  const day = dayKey(now)
-  const today = [...(withLive(rec.days, rec.live)[day]?.[project] ?? []), ...(others[day]?.[project] ?? [])]
-  return `${paused ? '⏸' : '⏱'} ${fmt(total(today))} ${strings[lang].today} · ${folderName(project)}`
-}
+/** `today` is the project's time shown for today: every session's, corrections applied, as the panel shows it. */
+export const statusText = (today: number, project: string, lang: Lang, paused: boolean) =>
+  `${paused ? '⏸' : '⏱'} ${formatDuration(today)} ${strings[lang].today} · ${folderName(project)}`
