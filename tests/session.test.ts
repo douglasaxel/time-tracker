@@ -15,7 +15,13 @@ function world(on: On, start: number, store: Record<string, unknown> = {}, isEnv
   on('store.delete', (_, e) => { delete store[e.key]; return { value: undefined } })
   on('store.keys', () => ({ value: Object.keys(store) }))
   on('ui.status', (_, e) => { statuses.push(e.text); return { value: undefined } })
+  const files: Record<string, string> = {}
   on('session.root', () => ({ value: session.root }))
+  on('fs.read', (_, e) => {
+    const text = files[e.path.replace(/\\/g, '/')]
+    if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
+    return { value: text }
+  })
   on('session.id', () => ({ value: session.id }))
   on('settings.read', () => ({ value: {} }))
   if (isEnvMocked) on('env.get', () => ({ value: undefined }))
@@ -27,7 +33,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}, isEnv
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  return { clock, statuses, session, store, status: () => statuses.at(-1) }
+  return { clock, statuses, session, store, files, status: () => statuses.at(-1) }
 }
 
 const startSession = ($: TestEngine) => $.session.start({ cwd: 'C:/work/room/app-a', surface: 'terminal', isInteractive: true })
@@ -136,4 +142,44 @@ test('auto language follows the system locale', async ($, on) => {
   const w = world(on, at(9, 0), {}, false)
   await startSession($)
   expect(w.status()).toBe('⏱ 0h 00min hoje · app-a')
+})
+
+test('after a /cd the new time goes to the new folder and the earlier time stays in the old one', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  await startSession($)
+  await interact($, w, 't1', 5)
+  await w.clock.advance(2 * MIN)
+  w.session.root = 'C:/work/room/app-b'
+  await interact($, w, 't2', 4)
+  await w.clock.advance(MIN)
+  expect(w.status()).toBe('⏱ 0h 04min hoje · app-b')
+  w.session.root = 'C:/work/room/app-a'
+  await $.prompt.submit({ text: 'back', wait: false, origin: { kind: 'composer' } })
+  expect(w.status()).toBe('⏱ 0h 07min hoje · app-a')
+})
+
+test('a /cd while Claude answers moves the time on the next minute', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  await startSession($)
+  await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await w.clock.advance(3 * MIN)
+  w.session.root = 'C:/work/room/app-b'
+  await w.clock.advance(2 * MIN)
+  await $.turn.complete({ answer: 'ok', durationMs: 5 * MIN, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(w.status()).toBe('⏱ 0h 01min hoje · app-b')
+  w.session.root = 'C:/work/room/app-a'
+  await $.prompt.submit({ text: 'back', wait: false, origin: { kind: 'composer' } })
+  expect(w.status()).toBe('⏱ 0h 04min hoje · app-a')
+})
+
+test('a session in a worktree records its time in the main repository', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  w.session.root = 'C:\\work\\room\\app-a\\.claude\\worktrees\\wt'
+  w.files['C:/work/room/app-a/.claude/worktrees/wt/.git'] = 'gitdir: C:/work/room/app-a/.git/worktrees/wt\n'
+  await startSession($)
+  await interact($, w, 't1', 5)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 'sess-1', resume: { id: 'sess-1' } })
+  expect(w.status()).toBe('⏱ 0h 05min hoje · app-a')
+  expect(w.store['session:sess-1']).toEqual({ days: { '2026-10-18': { 'C:/work/room/app-a': [[at(9, 0), at(9, 5)]] } } })
 })

@@ -34,11 +34,30 @@ async function detectLang($: EngineInterface, option: unknown): Promise<Lang> {
   }
 }
 
-/** The project: the session's project root, with `/` separators and no trailing one. */
-async function project($: EngineInterface): Promise<string> {
-  const p = (await $.session.root()).replace(/\\/g, '/')
-  return p.length > 3 ? p.replace(/\/+$/, '') : p
+// --- #6 project: /cd and worktree ---
+const slash = (p: string) => {
+  const s = p.trim().replace(/\\/g, '/')
+  return s.length > 3 ? s.replace(/\/+$/, '') : s
 }
+const projectOf = new Map<string, string>()
+
+/**
+ * The project: the session's project root, re-read at every activity edge and minute (a /cd
+ * moves it, with no event), or the main repository when that root is a worktree, as its `.git`
+ * file's `gitdir: <main>/.git/worktrees/<name>` says. `/` separators, no trailing one.
+ */
+async function project($: EngineInterface): Promise<string> {
+  const root = slash(await $.session.root())
+  const known = projectOf.get(root)
+  if (known) return known
+  // ponytail: an absolute gitdir only; a relative one (worktree.useRelativePaths) counts for the worktree.
+  const git = await $.fs.read(`${root}/.git`).catch(() => '')
+  const main = typeof git === 'string' ? /^gitdir:\s*(.+?)\/\.git\/worktrees\/[^/]+\s*$/m.exec(slash(git))?.[1] : undefined
+  const p = main && /^([a-z]:)?\//i.test(main) ? slash(main) : root
+  projectOf.set(root, p)
+  return p
+}
+// --- end #6 ---
 
 /** Binds the record to the current session id, picking up what that session already stored. */
 async function ensureSession($: EngineInterface) {

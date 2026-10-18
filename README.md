@@ -8,6 +8,8 @@ A Claude Code mod that measures the time worked on each project, on its own, and
 
 Time counts while Claude answers and across short pauses between interactions; a gap longer than the idle limit does not count. Each session records its own intervals per project and local day in the plugin store.
 
+The project is the session's project root: after a `/cd`, new time goes to the new folder. A session in a git worktree counts for the main repository.
+
 ## Install
 
 ```
