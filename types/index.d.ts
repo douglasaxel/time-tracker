@@ -23,6 +23,6 @@ export type Rec = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'time-tracker': { rec: Rec }
+    'time-tracker': { rec: Rec; background: boolean }
   }
 }
