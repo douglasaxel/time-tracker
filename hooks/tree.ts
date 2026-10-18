@@ -1,6 +1,7 @@
 // The tree: folders from the disk root down to each project with time, single-child
 // folders without time of their own folded into one node. Pure.
-import type { Days } from '../types'
+import type { DayTotals, Days } from '../types'
+import { merge } from './ledger'
 import { total } from './time'
 
 export type Node = {
@@ -13,11 +14,24 @@ export type Node = {
   children: Node[]
 }
 
-/** Time worked per project over `days`. */
-export function projectTotals(days: Days): Record<string, number> {
+/**
+ * Time worked per day and project: this session's and the other sessions' intervals united
+ * (overlaps count once), and a closed day's stored total where it is the larger.
+ */
+export function dayTotals(own: Days, others: Days, closed: Readonly<Record<string, DayTotals>>): Record<string, DayTotals> {
+  const out: Record<string, DayTotals> = {}
+  for (const [day, projects] of Object.entries(closed)) out[day] = { ...projects }
+  for (const [day, projects] of Object.entries(merge([{ days: own }, { days: others }]))) {
+    const d = (out[day] ??= {})
+    for (const [p, intervals] of Object.entries(projects)) d[p] = Math.max(d[p] ?? 0, total(intervals))
+  }
+  return out
+}
+
+/** Time worked per project over the days. */
+export function projectTotals(days: Readonly<Record<string, DayTotals>>): Record<string, number> {
   const out: Record<string, number> = {}
-  for (const projects of Object.values(days))
-    for (const [p, intervals] of Object.entries(projects)) out[p] = (out[p] ?? 0) + total(intervals)
+  for (const projects of Object.values(days)) for (const [p, ms] of Object.entries(projects)) out[p] = (out[p] ?? 0) + ms
   return out
 }
 

@@ -109,3 +109,18 @@ test('the panel redraws each minute while the session is active', { options: { l
   await w.clock.advance(MIN)
   expect(await tree(ui)).toContain('· app-a 0h 21min')
 })
+
+test('the tree counts every session once, closed days included', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0), {
+    // Another session in app-a today, overlapping this one's first 10 minutes, and in app-b.
+    'session:sess-0': { days: { '2026-10-18': { [`${W}/room/app-a`]: [[at(8, 50), at(9, 10)]], [`${W}/room/app-b`]: [[at(8, 0), at(8, 30)]] } } },
+    // A closed day, compacted into a total per project.
+    'day:2026-10-10': { [`${W}/room/app-b`]: 45 * MIN },
+  })
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await w.clock.advance(21 * MIN)
+  expect(await tree(ui)).toEqual([`▾ ${W}/room 1h 46min`, '· app-a 0h 31min', '· app-b 1h 15min'])
+})

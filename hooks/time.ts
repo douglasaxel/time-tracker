@@ -49,12 +49,15 @@ export const withLive = (days: Days, live: Live | null): Days =>
 
 /**
  * An active instant at `now` in `project`. A gap since the last active instant up to the
- * idle limit is a short pause and counts; a longer gap, or another project, starts a new activity.
+ * idle limit is a short pause and counts; a longer gap starts a new activity. Another project
+ * (a /cd) within the limit closes the old project's activity at `now` and opens the new one there.
  */
 export function touch(rec: Rec, now: number, project: string, idleMs: number): Rec {
   const { live } = rec
-  if (live && live.project === project && now >= live.last && now - live.last <= idleMs) return { ...rec, live: { ...live, last: now } }
-  return { ...rec, days: withLive(rec.days, live), live: { project, start: now, last: now } }
+  const isOn = live && now >= live.last && now - live.last <= idleMs
+  if (isOn && live.project === project) return { ...rec, live: { ...live, last: now } }
+  const ended = isOn ? { ...live, last: now } : live
+  return { ...rec, days: withLive(rec.days, ended), live: { project, start: now, last: now } }
 }
 
 /** With no activity for longer than the idle limit, the activity ends at its last active instant. */

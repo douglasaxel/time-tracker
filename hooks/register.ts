@@ -3,19 +3,17 @@
 // every hook passes `next(e)` on unchanged.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
-import type { Rec, SessionRecord } from '../types'
+import type { DayTotals, Days, Rec, SessionRecord } from '../types'
 import { isPortuguese, strings, type Lang } from './i18n'
 import { panel } from './panel'
 import { statusText } from './status'
-import { MIN, expire, touch, withLive } from './time'
-import { buildTree, projectTotals } from './tree'
+import { ledger, sessionKey } from './ledger'
+import { MIN, dayKey, expire, touch, withLive } from './time'
+import { buildTree, dayTotals, projectTotals } from './tree'
 
 const empty: Rec = { id: null, days: {}, live: null, turns: [] }
 const recAtom = atom({ plugin: 'time-tracker', key: 'rec' } as const, empty)
 const PANE = 'time-tracker' // the /horas panel (#3)
-
-/** Store layout: each session writes only its own key. */
-const sessionKey = (id: string) => `session:${id}`
 
 // Module variables reset on every load; register and session.start set them again.
 let idleMs = 10 * MIN
@@ -37,18 +35,38 @@ async function detectLang($: EngineInterface, option: unknown): Promise<Lang> {
   }
 }
 
-/** The project: the session's project root, with `/` separators and no trailing one. */
-async function project($: EngineInterface): Promise<string> {
-  const p = (await $.session.root()).replace(/\\/g, '/')
-  return p.length > 3 ? p.replace(/\/+$/, '') : p
+// --- #6 project: /cd and worktree ---
+const slash = (p: string) => {
+  const s = p.trim().replace(/\\/g, '/')
+  return s.length > 3 ? s.replace(/\/+$/, '') : s
 }
+const projectOf = new Map<string, string>()
+
+/**
+ * The project: the session's project root, re-read at every activity edge and minute (a /cd
+ * moves it, with no event), or the main repository when that root is a worktree, as its `.git`
+ * file's `gitdir: <main>/.git/worktrees/<name>` says. `/` separators, no trailing one.
+ */
+async function project($: EngineInterface): Promise<string> {
+  const root = slash(await $.session.root())
+  const known = projectOf.get(root)
+  if (known) return known
+  // ponytail: an absolute gitdir only; a relative one (worktree.useRelativePaths) counts for the worktree.
+  const git = await $.fs.read(`${root}/.git`).catch(() => '')
+  const main = typeof git === 'string' ? /^gitdir:\s*(.+?)\/\.git\/worktrees\/[^/]+\s*$/m.exec(slash(git))?.[1] : undefined
+  const p = main && /^([a-z]:)?\//i.test(main) ? slash(main) : root
+  projectOf.set(root, p)
+  return p
+}
+// --- end #6 ---
 
 /** Binds the record to the current session id, picking up what that session already stored. */
 async function ensureSession($: EngineInterface) {
   if ((await read($, recAtom)).id) return
   const id = await $.session.id()
   const stored = (await $.store.get(sessionKey(id))) as SessionRecord | undefined
-  await update($, recAtom, r => (r.id ? r : { ...empty, id, days: stored?.days ?? {} }))
+  const rec = await update($, recAtom, r => (r.id ? r : { ...empty, id, days: stored?.days ?? {} }))
+  await quiet(sync($, rec, await $.clock.now()))
 }
 
 async function persist($: EngineInterface, rec: Rec) {
@@ -61,7 +79,7 @@ async function persist($: EngineInterface, rec: Rec) {
 }
 
 async function showStatus($: EngineInterface, rec: Rec, now: number) {
-  $.ui.status(statusText(rec, now, rec.live?.project ?? (await project($)), lang))
+  $.ui.status(statusText(rec, now, rec.live?.project ?? (await project($)), lang, others))
 }
 
 /** An active instant now: a prompt, a step's start or end, a turn's start or end. */
@@ -80,12 +98,40 @@ async function activity($: EngineInterface, edge: { turnStart?: string; turnEnd?
 /** Each minute: a running turn keeps the session active; otherwise the idle limit may end the activity. */
 async function tick($: EngineInterface) {
   const now = await $.clock.now()
-  const busy = (await read($, recAtom)).turns.length > 0
+  const busy = (await read($, recAtom)).turns.length > 0 || (await read($, bgAtom))
   const p = busy ? await project($) : ''
   const rec = await update($, recAtom, r => (busy ? touch(r, now, p, idleMs) : expire(r, now, idleMs)))
   await persist($, rec)
+  await quiet(sync($, rec, now))
   await showStatus($, rec, now)
 }
+
+// ---- #4: sessions in parallel and compaction (logic in ledger.ts) ----
+/** The other sessions' days, read from the store when a session id binds and each minute. */
+let others: Days = {}
+/** The closed days' totals, as `sync` last saw them (read by the /horas panel, #3). */
+let closed: Record<string, DayTotals> = {}
+
+/** Reads every session and closed-day key, compacts the closed days, and refreshes `others`. */
+async function sync($: EngineInterface, rec: Rec, now: number) {
+  const entries: Record<string, unknown> = {}
+  for (const k of await $.store.keys()) if (/^(session|day):/.test(k)) entries[k] = await $.store.get(k)
+  const own = rec.id ? sessionKey(rec.id) : ''
+  if (own) entries[own] = { days: withLive(rec.days, rec.live) }
+  const plan = ledger(entries, own, dayKey(now - idleMs - MIN))
+  for (const [k, v] of plan.set) await $.store.set(k, v)
+  for (const k of plan.remove) await $.store.delete(k)
+  others = plan.others
+  const days = [...Object.entries(entries).filter(([k]) => k.startsWith('day:')), ...plan.set]
+  closed = Object.fromEntries(days.map(([k, v]) => [k.slice('day:'.length), v as DayTotals]))
+}
+// ---- end #4 ----
+
+// --- #7 background work: while any background task of the session runs, the session counts as active.
+// classic.Stop lists the work still in flight at each main-turn end; when a task ends it wakes the
+// session (a task-notification prompt), so the next Stop lists what is left.
+const bgAtom = atom({ plugin: 'time-tracker', key: 'background' } as const, false)
+// --- end #7
 
 const turnKey = (e: { turnId: string; agentId?: string }) => `${e.agentId ?? 'main'}:${e.turnId}`
 
@@ -138,6 +184,13 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // --- #7 background work
+  on('classic.Stop', async ($, e, next) => {
+    await quiet(update($, bgAtom, () => (e.background_tasks?.length ?? 0) > 0))
+    return next(e)
+  })
+  // --- end #7
+
   // --- /horas panel (#3): the command toggles the pane; the drawing reads the record, so each tick redraws it.
   const collapsed = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
 
@@ -153,7 +206,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const rec = await read($, recAtom)
     return panel($.ui.resolve(e), {
-      roots: buildTree(projectTotals(withLive(rec.days, rec.live))),
+      roots: buildTree(projectTotals(dayTotals(withLive(rec.days, rec.live), others, closed))),
       collapsed: await read($, collapsed),
       lang,
       onToggle: path => update($, collapsed, c => (c.includes(path) ? c.filter(p => p !== path) : [...c, path])),
