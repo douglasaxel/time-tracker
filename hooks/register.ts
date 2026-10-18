@@ -8,7 +8,7 @@ import { isPortuguese, strings, type Lang } from './i18n'
 import { panel } from './panel'
 import { statusText } from './status'
 import { ledger, sessionKey } from './ledger'
-import { MIN, dayKey, expire, touch, withLive } from './time'
+import { MIN, dayKey, expire, pause, touch, withLive } from './time'
 import { buildTree, dayTotals, projectTotals } from './tree'
 
 const empty: Rec = { id: null, days: {}, live: null, turns: [] }
@@ -79,7 +79,7 @@ async function persist($: EngineInterface, rec: Rec) {
 }
 
 async function showStatus($: EngineInterface, rec: Rec, now: number) {
-  $.ui.status(statusText(rec, now, rec.live?.project ?? (await project($)), lang, others))
+  $.ui.status(statusText(rec, now, rec.live?.project ?? (await project($)), lang, others, await read($, pausedAtom)))
 }
 
 /** An active instant now: a prompt, a step's start or end, a turn's start or end. */
@@ -87,10 +87,11 @@ async function activity($: EngineInterface, edge: { turnStart?: string; turnEnd?
   await ensureSession($)
   const now = await $.clock.now()
   const p = await project($)
+  const paused = await read($, pausedAtom)
   const rec = await update($, recAtom, r => {
     const turns = r.turns.filter(t => t !== edge.turnEnd)
     if (edge.turnStart && !turns.includes(edge.turnStart)) turns.push(edge.turnStart)
-    return { ...touch(r, now, p, idleMs), turns }
+    return { ...(paused ? r : touch(r, now, p, idleMs)), turns }
   })
   await showStatus($, rec, now)
 }
@@ -100,7 +101,8 @@ async function tick($: EngineInterface) {
   const now = await $.clock.now()
   const busy = (await read($, recAtom)).turns.length > 0 || (await read($, bgAtom))
   const p = busy ? await project($) : ''
-  const rec = await update($, recAtom, r => (busy ? touch(r, now, p, idleMs) : expire(r, now, idleMs)))
+  const paused = await read($, pausedAtom)
+  const rec = await update($, recAtom, r => (paused ? r : busy ? touch(r, now, p, idleMs) : expire(r, now, idleMs)))
   await persist($, rec)
   await quiet(sync($, rec, now))
   await showStatus($, rec, now)
@@ -132,6 +134,21 @@ async function sync($: EngineInterface, rec: Rec, now: number) {
 // session (a task-notification prompt), so the next Stop lists what is left.
 const bgAtom = atom({ plugin: 'time-tracker', key: 'background' } as const, false)
 // --- end #7
+
+// --- #8 manual pause: per session in $.state (survives hot reloads); while on, activity records nothing.
+const pausedAtom = atom({ plugin: 'time-tracker', key: 'paused' } as const, false)
+
+/** Pause closes the activity in progress at this moment; Resume lets the next activity count. */
+async function togglePause($: EngineInterface) {
+  await ensureSession($)
+  const now = await $.clock.now()
+  const p = await project($)
+  const paused = await update($, pausedAtom, x => !x)
+  const rec = paused ? await update($, recAtom, r => pause(r, now, p, idleMs)) : await read($, recAtom)
+  await persist($, rec)
+  await showStatus($, rec, now)
+}
+// --- end #8
 
 const turnKey = (e: { turnId: string; agentId?: string }) => `${e.agentId ?? 'main'}:${e.turnId}`
 
@@ -210,6 +227,8 @@ export const register: Register = (on, options) => {
       collapsed: await read($, collapsed),
       lang,
       onToggle: path => update($, collapsed, c => (c.includes(path) ? c.filter(p => p !== path) : [...c, path])),
+      paused: await read($, pausedAtom),
+      onPause: () => quiet(togglePause($)),
     })
   })
   // --- end /horas panel

@@ -11,12 +11,25 @@ export type PanelArgs = {
   collapsed: readonly string[]
   lang: Lang
   onToggle: (path: string) => unknown
+  /** This session's manual pause (#8) and what pressing Pause or Resume does. */
+  paused: boolean
+  onPause: () => unknown
 }
 
-export function panel(ui: Elements[RenderSurface], { roots, collapsed, lang, onToggle }: PanelArgs): RenderElement {
+export function panel(ui: Elements[RenderSurface], { roots, collapsed, lang, onToggle, paused, onPause }: PanelArgs): RenderElement {
   const { Box, Text, Button } = ui
   const s = strings[lang]
-  if (!roots.length) return <Text dimColor>{s.empty}</Text>
+
+  // #8: Pause or Resume first, with the reason the count stands still while paused.
+  const control = (
+    <Box key="control" flexDirection="row" gap={2} marginBottom={1}>
+      <Button key="pause" variant={paused ? 'primary' : 'secondary'} onPress={() => void onPause()}>
+        {paused ? s.resume : s.pause}
+      </Button>
+      {paused ? <Text color="warning">{s.paused}</Text> : null}
+    </Box>
+  )
+  if (!roots.length) return <Box flexDirection="column">{control}<Text dimColor>{s.empty}</Text></Box>
 
   // Each row: a folder that opens and closes, or a project; its total right-aligned.
   const rows = (n: Node, depth: number): RenderElement[] => {
@@ -42,6 +55,7 @@ export function panel(ui: Elements[RenderSurface], { roots, collapsed, lang, onT
 
   return (
     <Box flexDirection="column">
+      {control}
       <Box key="total" flexDirection="row" justifyContent="space-between" gap={2} marginBottom={1}>
         <Text bold>{s.total}</Text>
         <Text bold>{fmt(roots.reduce((t, n) => t + n.total, 0))}</Text>

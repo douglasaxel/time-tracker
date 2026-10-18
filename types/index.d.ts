@@ -31,6 +31,8 @@ declare module 'claude-code' {
       background: boolean
       /** Folder paths collapsed in the /horas panel. */
       collapsed: string[]
+      /** Manual pause of this session (#8): while on, no activity is recorded. */
+      paused: boolean
     }
   }
 }

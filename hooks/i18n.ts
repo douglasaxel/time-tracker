@@ -13,6 +13,10 @@ export const strings = {
     closed: 'Hours panel closed',
     total: 'Total',
     empty: 'No time worked yet. Time counts while you work with Claude in a project.',
+    // Manual pause (#8).
+    pause: '⏸ Pause',
+    resume: '▶ Resume',
+    paused: 'Paused: this session is not counting time.',
   },
   pt: {
     today: 'hoje',
@@ -22,5 +26,8 @@ export const strings = {
     closed: 'Painel de horas fechado',
     total: 'Total',
     empty: 'Nenhum tempo trabalhado ainda. O tempo conta enquanto você trabalha com o Claude num projeto.',
+    pause: '⏸ Pausar',
+    resume: '▶ Retomar',
+    paused: 'Em pausa: esta sessão não está contando tempo.',
   },
 } satisfies Record<Lang, Record<string, string>>

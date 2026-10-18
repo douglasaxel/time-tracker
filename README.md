@@ -14,6 +14,8 @@ The project is the session's project root: after a `/cd`, new time goes to the n
 
 `/horas` opens and closes a panel with the tree of folders from the disk root down to each project with time. Single-child folders without time of their own fold into one node, each folder shows its folder total (its own time plus that of the folders inside it), and folders open and close with a press.
 
+At the top, **Pause** stops the count for the current session until **Resume**; other sessions keep counting. While paused the status line shows `⏸` instead of `⏱`.
+
 ## Install
 
 ```
