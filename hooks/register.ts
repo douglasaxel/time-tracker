@@ -77,12 +77,18 @@ async function activity($: EngineInterface, edge: { turnStart?: string; turnEnd?
 /** Each minute: a running turn keeps the session active; otherwise the idle limit may end the activity. */
 async function tick($: EngineInterface) {
   const now = await $.clock.now()
-  const busy = (await read($, recAtom)).turns.length > 0
+  const busy = (await read($, recAtom)).turns.length > 0 || (await read($, bgAtom))
   const p = busy ? await project($) : ''
   const rec = await update($, recAtom, r => (busy ? touch(r, now, p, idleMs) : expire(r, now, idleMs)))
   await persist($, rec)
   await showStatus($, rec, now)
 }
+
+// --- #7 background work: while any background task of the session runs, the session counts as active.
+// classic.Stop lists the work still in flight at each main-turn end; when a task ends it wakes the
+// session (a task-notification prompt), so the next Stop lists what is left.
+const bgAtom = atom({ plugin: 'time-tracker', key: 'background' } as const, false)
+// --- end #7
 
 const turnKey = (e: { turnId: string; agentId?: string }) => `${e.agentId ?? 'main'}:${e.turnId}`
 
@@ -133,4 +139,11 @@ export const register: Register = (on, options) => {
     await quiet(activity($, { turnEnd: turnKey(e) }))
     return next(e)
   })
+
+  // --- #7 background work
+  on('classic.Stop', async ($, e, next) => {
+    await quiet(update($, bgAtom, () => (e.background_tasks?.length ?? 0) > 0))
+    return next(e)
+  })
+  // --- end #7
 }
