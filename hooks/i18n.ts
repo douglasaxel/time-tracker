@@ -27,6 +27,14 @@ export const strings = {
     adjustHint: '+15 or -30 min',
     deleteDay: 'Delete this day',
     corrected: '* corrected by hand',
+    // Copy as Markdown (#10).
+    copy: 'Copy as Markdown',
+    copied: 'Copied. Paste it into your hours report.',
+    copyFailed: 'The clipboard did not take it. Select the table below and copy it.',
+    colDate: 'Date',
+    colProject: 'Project',
+    colHours: 'Hours',
+    to: 'to',
   },
   pt: {
     today: 'hoje',
@@ -45,6 +53,13 @@ export const strings = {
     adjustHint: '+15 ou -30 min',
     deleteDay: 'Apagar este dia',
     corrected: '* corrigido à mão',
+    copy: 'Copiar como Markdown',
+    copied: 'Copiado. Cole no relatório de horas.',
+    copyFailed: 'A área de transferência não aceitou. Selecione a tabela abaixo e copie.',
+    colDate: 'Data',
+    colProject: 'Projeto',
+    colHours: 'Horas',
+    to: 'a',
   },
 } satisfies Record<Lang, Record<string, string>>
 

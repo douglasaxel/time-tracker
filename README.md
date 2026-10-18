@@ -18,6 +18,8 @@ Time is split by local day: an activity that crosses midnight counts its part on
 
 Each day lists the time of each project inside the selected folder. Pressing a project's time on a day opens its correction: type minutes to add or subtract (`+15`, `-30`) or press **Delete this day** to zero it (mobile has the delete only). The time shown everywhere is the measured time plus the corrections, never below zero, and a corrected day is marked `*`. Corrections are kept per day under `fix:<YYYY-MM-DD>` (project to minutes added, in ms), apart from the measured time, so compaction leaves them alone.
 
+Under the selected folder, **Copy as Markdown** copies its days in the period as a table for an hours report: a title with the folder and the period, columns Date | Project | Hours (the project relative to the folder), one row per day and project, a Total row, and `*` with a footnote on corrected rows. Hours read `Xh MMmin`, never rounded. If the clipboard does not take it (some desktops), the pane shows the table to copy by hand.
+
 At the top, **Pause** stops the count for the current session until **Resume**; other sessions keep counting. While paused the status line shows `⏸` instead of `⏱`.
 
 ## Install

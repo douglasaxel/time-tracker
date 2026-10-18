@@ -6,6 +6,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { DayTotals, Days, Fixes, Rec, SessionRecord } from '../types'
 import { applyFixes, fixKey, nextFix, parseMinutes } from './fix'
 import { isPortuguese, strings, type Lang } from './i18n'
+import { markdownTable } from './markdown'
 import { panel } from './panel'
 import { statusText } from './status'
 import { ledger, sessionKey } from './ledger'
@@ -234,6 +235,7 @@ export const register: Register = (on, options) => {
   const collapsed = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
   const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'all') // #5
   const selectedAtom = atom({ plugin: 'time-tracker', key: 'selected' } as const, null) // #5
+  const copyAtom = atom({ plugin: 'time-tracker', key: 'copy' } as const, null) // #10
 
   on('command.run', { command: 'horas' }, async $ => {
     if ((await $.ui.panes()).some(p => p.id === PANE)) {
@@ -249,8 +251,10 @@ export const register: Register = (on, options) => {
     // #5: the days in the chosen period, and the selected folder's days among them.
     const filter = await read($, filterAtom)
     const fixes = await read($, fixesAtom) // #9: shown time is measured plus corrections
-    const days = inPeriod(applyFixes(dayTotals(withLive(rec.days, rec.live), others, closed), fixes), period(filter, await $.clock.now()))
+    const range = period(filter, await $.clock.now())
+    const days = inPeriod(applyFixes(dayTotals(withLive(rec.days, rec.live), others, closed), fixes), range)
     const selected = await read($, selectedAtom)
+    const shown = selected ? folderDays(days, selected, fixes) : []
     return panel($.ui.resolve(e), {
       roots: buildTree(projectTotals(days)),
       collapsed: await read($, collapsed),
@@ -259,13 +263,21 @@ export const register: Register = (on, options) => {
       paused: await read($, pausedAtom),
       onPause: () => quiet(togglePause($)),
       filter,
-      selected: selected ? { path: selected, days: folderDays(days, selected, fixes) } : null,
-      onFilter: f => update($, filterAtom, () => f),
-      onPick: path => update($, selectedAtom, s => (s === path ? null : path)),
+      selected: selected ? { path: selected, days: shown } : null,
+      onFilter: f => Promise.all([update($, filterAtom, () => f), update($, copyAtom, () => null)]),
+      onPick: path => Promise.all([update($, selectedAtom, s => (s === path ? null : path)), update($, copyAtom, () => null)]),
       fixing: await read($, fixingAtom),
       onFix: target => update($, fixingAtom, t => (t === target ? null : target)),
       onAdjust: text => quiet(correct($, parseMinutes(text))),
       onDelete: () => quiet(correct($, 'delete')),
+      copy: await read($, copyAtom),
+      // #10: the table as drawn; a desktop may refuse the copy, so the outcome is always shown.
+      onCopy: surface =>
+        quiet((async () => {
+          const text = selected ? markdownTable(selected, shown, filter, range, lang) : ''
+          const r = await $.ui.copy({ text, surface }).catch(() => ({ isCopied: false }))
+          await update($, copyAtom, () => ({ ok: r.isCopied, text }))
+        })()),
     })
   })
   // --- end /horas panel

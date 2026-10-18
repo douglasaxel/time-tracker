@@ -11,6 +11,8 @@ const W = 'C:/Users/dougl/workstation'
 function world(on: On, start: number, store: Record<string, unknown> = {}) {
   const clock = mock.clock(on, { now: start })
   const panes = new Set<string>()
+  const copied: string[] = []
+  const clipboard = { works: true }
   on('store.get', (_, e) => ({ value: store[e.key] }))
   on('store.set', (_, e) => { store[e.key] = JSON.parse(JSON.stringify(e.value)); return { value: undefined } })
   on('store.delete', (_, e) => { delete store[e.key]; return { value: undefined } })
@@ -19,6 +21,10 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   on('ui.panes', () => ({ value: [...panes].map(id => ({ id, title: '', isShown: true, isFocused: false, isPlaced: true })) }))
   on('ui.open', (_, e) => { panes.add(e.id); return { value: { isPlaced: true } } })
   on('ui.close', (_, e) => { panes.delete(e.id); return { value: undefined } })
+  on('ui.copy', (_, e) => {
+    copied.push(e.text)
+    return { value: clipboard.works ? { isCopied: true as const } : { isCopied: false as const, reason: 'no-clipboard' as const } }
+  })
   on('command.register', () => ({ value: { command: 'horas' } }))
   on('session.root', () => ({ value: `${W}/room/app-a` }))
   on('session.id', () => ({ value: 'sess-1' }))
@@ -28,7 +34,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   on('prompt.submit', (_, e) => ({ text: e.text }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  return { clock, panes }
+  return { clock, panes, copied, clipboard }
 }
 
 /** This session's earlier time, read back on start (a resume). */
@@ -258,3 +264,62 @@ test('a correction is kept in the store, survives the day closing and applies to
   expect(await tree(ui)).toEqual([`· ${W}/room/app-b 0h 20min`])
 })
 // ---- end #9 ----
+
+// ---- #10 copy as Markdown ----
+/** Two projects in `room` this week, seconds and all, and a correction on Tuesday. */
+const report = () => ({
+  'day:2026-10-11': { [`${W}/room/app-a`]: 50 * MIN }, // the Sunday before this week: left out
+  'day:2026-10-12': { [`${W}/room/app-a`]: 179 * MIN + 40_000, [`${W}/room/app-b`]: 180 * MIN + 30_000 },
+  'day:2026-10-13': { [`${W}/room/app-a`]: 40 * MIN },
+  'day:2026-10-14': { [`${W}/personal/site`]: 25 * MIN }, // outside the folder: left out
+  'fix:2026-10-13': { [`${W}/room/app-a`]: -30 * MIN },
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: Copy as Markdown copies the folder's days in the period, with the total and the corrected mark`, { options: { language: 'pt' } }, async ($, on) => {
+    const w = world(on, at(9, 0), report())
+    await startSession($)
+    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await ui.press({ key: 'filter:week' })
+    await ui.press({ key: `pick:${W}/room` })
+    await ui.press({ key: 'copy' })
+    expect(w.copied).toEqual([
+      [
+        '## room · Semana, 12/10/2026 a 18/10/2026',
+        '',
+        '| Data | Projeto | Horas |',
+        '| --- | --- | ---: |',
+        '| seg 12/10 | app-a | 2h 59min |',
+        '| seg 12/10 | app-b | 3h 00min |',
+        '| ter 13/10 | app-a | 0h 10min * |',
+        '| **Total** | | **6h 10min** |',
+        '',
+        '\\* corrigido à mão',
+        '',
+      ].join('\n'),
+    ])
+    expect((await ui.find({ type: 'Text', text: /Copiado/ }))?.text).toBeDefined()
+  })
+
+  test(`${surface}: when the clipboard does not answer, the pane shows the table to copy by hand`, { options: { language: 'en' } }, async ($, on) => {
+    const w = world(on, at(9, 0), report())
+    w.clipboard.works = false
+    await startSession($)
+    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await ui.press({ key: `pick:${W}/room/app-b` })
+    await ui.press({ key: 'copy' })
+    const table = [
+      '## app-b · All, 2026-10-12',
+      '',
+      '| Date | Project | Hours |',
+      '| --- | --- | ---: |',
+      '| Mon Oct 12 | app-b | 3h 00min |',
+      '| **Total** | | **3h 00min** |',
+      '',
+    ].join('\n')
+    expect(w.copied).toEqual([table])
+    expect((await ui.find({ type: 'Text', text: /clipboard did not take/ }))?.text).toBeDefined()
+    expect((await ui.find({ key: 'copied-table' }))?.text).toContain('| Mon Oct 12 | app-b | 3h 00min |')
+  })
+}
+// ---- end #10 ----

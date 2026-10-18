@@ -47,6 +47,8 @@ declare module 'claude-code' {
       fixes: Fixes
       /** The project day whose correction line is open, `<YYYY-MM-DD>|<project>` (#9). */
       fixing: string | null
+      /** The last Copy as Markdown (#10): whether the clipboard took it, and the table copied. */
+      copy: { ok: boolean; text: string } | null
     }
   }
 }

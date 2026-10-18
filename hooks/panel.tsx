@@ -33,10 +33,15 @@ export type PanelArgs = {
   onAdjust: (text: string) => unknown
   /** Zeroes the open project day. */
   onDelete: () => unknown
+  // #10 copy as Markdown
+  /** The last copy's outcome and table, until the folder or the period changes. */
+  copy: { ok: boolean; text: string } | null
+  /** Copies the selected folder's table on the surface the press came from. */
+  onCopy: (surface: RenderSurface) => unknown
 }
 
 export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderElement {
-  const { roots, collapsed, lang, onToggle, paused, onPause, filter, selected, onFilter, onPick, fixing, onFix, onAdjust, onDelete } = args
+  const { roots, collapsed, lang, onToggle, paused, onPause, filter, selected, onFilter, onPick, fixing, onFix, onAdjust, onDelete, copy, onCopy } = args
   const { Box, Text, Button } = ui
   const s = strings[lang]
 
@@ -138,6 +143,16 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     ]
   }
 
+  // #10: the copy and what came of it, said next to the button; a refused copy shows the table to copy by hand.
+  const copyRow = (
+    <Box key="copy-row" flexDirection="row" gap={2} marginTop={1}>
+      <Button key="copy" onPress={e => void onCopy(e.surface)}>
+        {s.copy}
+      </Button>
+      {copy ? <Text color={copy.ok ? 'success' : 'warning'}>{copy.ok ? s.copied : s.copyFailed}</Text> : null}
+    </Box>
+  )
+
   const picked = selected && (
     <Box key="days" flexDirection="column" marginTop={1}>
       <Box key="days-head" flexDirection="row" justifyContent="space-between" gap={2}>
@@ -146,6 +161,12 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
       </Box>
       {selected.days.length ? selected.days.flatMap(dayRows) : <Text dimColor>{s.noTime}</Text>}
       {selected.days.some(d => d.corrected) ? <Text dimColor>{s.corrected}</Text> : null}
+      {selected.days.length ? copyRow : null}
+      {copy && !copy.ok ? (
+        <Box key="copied-table" marginTop={1}>
+          <ui.Code source={copy.text} language="markdown" />
+        </Box>
+      ) : null}
     </Box>
   )
 
