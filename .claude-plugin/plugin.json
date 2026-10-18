@@ -1,0 +1,29 @@
+{
+  "name": "time-tracker",
+  "version": "0.1.0",
+  "description": "Measures the time worked on each project with Claude Code and shows today's time in the status line.",
+  "author": {
+    "name": "douglasaxel",
+    "url": "https://github.com/douglasaxel"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "idleMinutes": {
+      "type": "number",
+      "title": "Idle limit (minutes)",
+      "description": "The longest gap between interactions that still counts as time worked",
+      "default": 10
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "auto follows Claude Code's language setting, then the system locale",
+      "default": "auto",
+      "options": ["auto", "en", "pt"]
+    }
+  },
+  "homepage": "https://github.com/douglasaxel/time-tracker",
+  "repository": "https://github.com/douglasaxel/time-tracker",
+  "license": "MIT",
+  "keywords": ["time", "tracking", "hours", "billing", "mod"]
+}

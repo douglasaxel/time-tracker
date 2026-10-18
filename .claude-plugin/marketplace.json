@@ -1,0 +1,15 @@
+{
+  "name": "time-tracker",
+  "owner": {
+    "name": "douglasaxel",
+    "url": "https://github.com/douglasaxel"
+  },
+  "description": "Time worked per project with Claude Code.",
+  "plugins": [
+    {
+      "name": "time-tracker",
+      "source": "./",
+      "description": "Measures time worked per project and shows today's time in the status line."
+    }
+  ]
+}
