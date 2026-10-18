@@ -24,6 +24,9 @@ export type Rec = {
   turns: string[]
 }
 
+/** The /horas panel's period: today, this week (Monday to Sunday), this month, or every day. */
+export type Filter = 'today' | 'week' | 'month' | 'all'
+
 declare module 'claude-code' {
   interface PluginState {
     'time-tracker': {
@@ -31,6 +34,10 @@ declare module 'claude-code' {
       background: boolean
       /** Folder paths collapsed in the /horas panel. */
       collapsed: string[]
+      /** The /horas panel's period (#5). */
+      filter: Filter
+      /** The folder whose days the /horas panel lists, if any (#5). */
+      selected: string | null
     }
   }
 }

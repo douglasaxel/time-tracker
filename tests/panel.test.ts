@@ -124,3 +124,70 @@ test('the tree counts every session once, closed days included', { options: { la
   await w.clock.advance(21 * MIN)
   expect(await tree(ui)).toEqual([`▾ ${W}/room 1h 46min`, '· app-a 0h 31min', '· app-b 1h 15min'])
 })
+
+// ---- #5 days and filters ----
+/** Time on several days: closed days as stored totals, today from another session. */
+const spread = () => ({
+  'day:2026-09-30': { [`${W}/room/app-a`]: 40 * MIN },
+  'day:2026-10-01': { [`${W}/room/app-b`]: 30 * MIN },
+  'day:2026-10-11': { [`${W}/room/app-a`]: 20 * MIN }, // the Sunday before this week
+  'day:2026-10-12': { [`${W}/room/app-b`]: 15 * MIN }, // this week's Monday
+  'session:sess-0': { days: { '2026-10-18': { [`${W}/room/app-a`]: [[at(8, 0), at(8, 5)]] } } }, // today, a Sunday
+})
+
+/** The selected folder's days as the person reads them: the day and its time. */
+async function days(ui: { findAll: (q: { type: 'Box' }) => Promise<{ key?: string; children: unknown[] }[]> }) {
+  const text = (c: unknown): string => (typeof c === 'string' ? c : ((c as { children?: unknown[] }).children ?? []).map(text).join(''))
+  return (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('day:')).map(b => b.children.map(text).join(' '))
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: the four filters change the tree and the totals; the week runs Monday to Sunday`, { options: { language: 'pt' } }, async ($, on) => {
+    world(on, at(9, 0), spread())
+    await startSession($)
+    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    const total = async () => (await ui.find({ key: 'total' }))?.text
+    await ui.press({ key: 'filter:today' })
+    expect(await tree(ui)).toEqual([`· ${W}/room/app-a 0h 05min`])
+    expect(await total()).toBe('Total0h 05min')
+    await ui.press({ key: 'filter:week' })
+    expect(await tree(ui)).toEqual([`▾ ${W}/room 0h 20min`, '· app-a 0h 05min', '· app-b 0h 15min'])
+    await ui.press({ key: 'filter:month' })
+    expect(await tree(ui)).toEqual([`▾ ${W}/room 1h 10min`, '· app-a 0h 25min', '· app-b 0h 45min'])
+    await ui.press({ key: 'filter:all' })
+    expect(await tree(ui)).toEqual([`▾ ${W}/room 1h 50min`, '· app-a 1h 05min', '· app-b 0h 45min'])
+    expect(await total()).toBe('Total1h 50min')
+  })
+
+  test(`${surface}: selecting a folder lists its days in the period with each day's time`, { options: { language: 'pt' } }, async ($, on) => {
+    world(on, at(9, 0), spread())
+    await startSession($)
+    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    expect(await days(ui)).toEqual([])
+    await ui.press({ key: 'filter:week' })
+    await ui.press({ key: `pick:${W}/room` })
+    expect(await days(ui)).toEqual(['seg 12/10 0h 15min', 'dom 18/10 0h 05min'])
+    await ui.press({ key: 'filter:all' })
+    expect(await days(ui)).toEqual(['qua 30/09 0h 40min', 'qui 01/10 0h 30min', 'dom 11/10 0h 20min', 'seg 12/10 0h 15min', 'dom 18/10 0h 05min'])
+    await ui.press({ key: `pick:${W}/room/app-b` })
+    await ui.press({ key: 'filter:month' })
+    expect(await days(ui)).toEqual(['qui 01/10 0h 30min', 'seg 12/10 0h 15min'])
+    await ui.press({ key: `pick:${W}/room/app-b` })
+    expect(await days(ui)).toEqual([])
+  })
+}
+
+test('an activity from 23:50 to 0:10 counts 10 minutes on each day', { options: { language: 'en' } }, async ($, on) => {
+  const w = world(on, at(23, 50, 17))
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await w.clock.advance(20 * MIN)
+  await ui.press({ key: 'filter:today' })
+  expect(await tree(ui)).toEqual([`· ${W}/room/app-a 0h 10min`])
+  await ui.press({ key: 'filter:all' })
+  await ui.press({ key: `pick:${W}/room/app-a` })
+  expect(await days(ui)).toEqual(['Sat Oct 17 0h 10min', 'Sun Oct 18 0h 10min'])
+})
+// ---- end #5 ----

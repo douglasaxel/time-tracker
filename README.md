@@ -14,6 +14,8 @@ The project is the session's project root: after a `/cd`, new time goes to the n
 
 `/horas` opens and closes a panel with the tree of folders from the disk root down to each project with time. Single-child folders without time of their own fold into one node, each folder shows its folder total (its own time plus that of the folders inside it), and folders open and close with a press.
 
+Time is split by local day: an activity that crosses midnight counts its part on each day. The filters at the top (Today, Week from Monday to Sunday, Month, All; keys 1 to 4 while the panel has the focus) set the period the tree and the totals cover. Pressing a folder's time selects it and lists its days in the period with each day's time; pressing it again clears the selection.
+
 ## Install
 
 ```

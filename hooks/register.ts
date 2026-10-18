@@ -8,8 +8,8 @@ import { isPortuguese, strings, type Lang } from './i18n'
 import { panel } from './panel'
 import { statusText } from './status'
 import { ledger, sessionKey } from './ledger'
-import { MIN, dayKey, expire, touch, withLive } from './time'
-import { buildTree, dayTotals, projectTotals } from './tree'
+import { MIN, dayKey, expire, period, touch, withLive } from './time'
+import { buildTree, dayTotals, folderDays, inPeriod, projectTotals } from './tree'
 
 const empty: Rec = { id: null, days: {}, live: null, turns: [] }
 const recAtom = atom({ plugin: 'time-tracker', key: 'rec' } as const, empty)
@@ -193,6 +193,8 @@ export const register: Register = (on, options) => {
 
   // --- /horas panel (#3): the command toggles the pane; the drawing reads the record, so each tick redraws it.
   const collapsed = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
+  const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'all') // #5
+  const selectedAtom = atom({ plugin: 'time-tracker', key: 'selected' } as const, null) // #5
 
   on('command.run', { command: 'horas' }, async $ => {
     if ((await $.ui.panes()).some(p => p.id === PANE)) {
@@ -205,11 +207,19 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const rec = await read($, recAtom)
+    // #5: the days in the chosen period, and the selected folder's days among them.
+    const filter = await read($, filterAtom)
+    const days = inPeriod(dayTotals(withLive(rec.days, rec.live), others, closed), period(filter, await $.clock.now()))
+    const selected = await read($, selectedAtom)
     return panel($.ui.resolve(e), {
-      roots: buildTree(projectTotals(dayTotals(withLive(rec.days, rec.live), others, closed))),
+      roots: buildTree(projectTotals(days)),
       collapsed: await read($, collapsed),
       lang,
       onToggle: path => update($, collapsed, c => (c.includes(path) ? c.filter(p => p !== path) : [...c, path])),
+      filter,
+      selected: selected ? { path: selected, days: folderDays(days, selected) } : null,
+      onFilter: f => update($, filterAtom, () => f),
+      onPick: path => update($, selectedAtom, s => (s === path ? null : path)),
     })
   })
   // --- end /horas panel

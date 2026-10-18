@@ -35,6 +35,19 @@ export function projectTotals(days: Readonly<Record<string, DayTotals>>): Record
   return out
 }
 
+/** The days from `from` to `to`, both included. */
+export const inPeriod = (days: Readonly<Record<string, DayTotals>>, [from, to]: readonly [string, string]) =>
+  Object.fromEntries(Object.entries(days).filter(([d]) => d >= from && d <= to))
+
+/** Each day's time worked in `folder` and every folder inside it, oldest first, days without time left out. */
+export function folderDays(days: Readonly<Record<string, DayTotals>>, folder: string): [string, number][] {
+  const inside = folder.endsWith('/') ? folder : `${folder}/`
+  return Object.entries(days)
+    .map(([d, projects]): [string, number] => [d, Object.entries(projects).reduce((n, [p, ms]) => (p === folder || p.startsWith(inside) ? n + ms : n), 0)])
+    .filter(([, ms]) => ms > 0)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+}
+
 type Raw = { path: string; name: string; own: number; children: Map<string, Raw> }
 
 const byName = (a: Node, b: Node) => a.name.localeCompare(b.name)

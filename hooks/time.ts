@@ -1,5 +1,5 @@
 // The time model: pure functions over intervals, days and the session record. No `$` here.
-import type { Days, Interval, Live, Rec } from '../types'
+import type { Days, Filter, Interval, Live, Rec } from '../types'
 
 export const MIN = 60_000
 
@@ -9,6 +9,19 @@ const pad = (n: number) => String(n).padStart(2, '0')
 export function dayKey(ms: number): string {
   const d = new Date(ms)
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** The first and last local day of the period holding `now`. The week runs Monday to Sunday. */
+export function period(filter: Filter, now: number): [string, string] {
+  const d = new Date(now)
+  const day = (offset: number, month = d.getMonth()) => dayKey(new Date(d.getFullYear(), month, offset).getTime())
+  if (filter === 'today') return [dayKey(now), dayKey(now)]
+  if (filter === 'month') return [day(1), day(0, d.getMonth() + 1)]
+  if (filter === 'week') {
+    const monday = d.getDate() - ((d.getDay() + 6) % 7)
+    return [day(monday), day(monday + 6)]
+  }
+  return ['', '9999-12-31']
 }
 
 const nextMidnight = (ms: number) => {
