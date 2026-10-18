@@ -191,3 +191,70 @@ test('an activity from 23:50 to 0:10 counts 10 minutes on each day', { options: 
   expect(await days(ui)).toEqual(['Sat Oct 17 0h 10min', 'Sun Oct 18 0h 10min'])
 })
 // ---- end #5 ----
+
+// ---- #9 corrections ----
+/** The selected folder's rows that take a correction: each project on each day, with its time and mark. */
+async function entries(ui: { findAll: (q: { type: 'Box' }) => Promise<{ key?: string; text: string }[]> }) {
+  return (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('entry:')).map(b => b.text.replace(/(\S)(\d+h \d\dmin)/, '$1 $2'))
+}
+
+/** Two projects on Monday, one on Tuesday. */
+const twoProjects = () => ({
+  'day:2026-10-12': { [`${W}/room/app-a`]: 20 * MIN, [`${W}/room/app-b`]: 15 * MIN },
+  'day:2026-10-13': { [`${W}/room/app-a`]: 40 * MIN },
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: each project on a folder's day takes a deletion or an adjustment, never below zero, and is marked`, { options: { language: 'pt' } }, async ($, on) => {
+    world(on, at(9, 0), twoProjects())
+    await startSession($)
+    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await ui.press({ key: `pick:${W}/room` })
+    expect(await entries(ui)).toEqual(['app-a 0h 20min', 'app-b 0h 15min', 'app-a 0h 40min'])
+
+    // −30 on a 20-minute day shows 0, marked.
+    await ui.press({ key: `fix:2026-10-12|${W}/room/app-a` })
+    await ui.input({ key: 'adjust', text: '-30', kind: 'submit' })
+    expect(await entries(ui)).toEqual(['app-a 0h 00min *', 'app-b 0h 15min', 'app-a 0h 40min'])
+    expect(await days(ui)).toEqual(['seg 12/10 0h 15min *', 'ter 13/10 0h 40min'])
+    // Adding back starts from what is shown.
+    await ui.input({ key: 'adjust', text: '+10', kind: 'submit' })
+    expect(await entries(ui)).toContain('app-a 0h 10min *')
+
+    // Delete zeroes the project's day; the other project keeps its time.
+    await ui.press({ key: `fix:2026-10-13|${W}/room/app-a` })
+    await ui.press({ key: 'delete' })
+    expect(await entries(ui)).toEqual(['app-a 0h 10min *', 'app-b 0h 15min', 'app-a 0h 00min *'])
+    expect(await tree(ui)).toEqual([`▾ ${W}/room 0h 25min`, '· app-a 0h 10min', '· app-b 0h 15min'])
+  })
+
+  test(`${surface}: a project's own days take the correction on the day row`, { options: { language: 'en' } }, async ($, on) => {
+    world(on, at(9, 0), twoProjects())
+    await startSession($)
+    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await ui.press({ key: `pick:${W}/room/app-a` })
+    expect(await entries(ui)).toEqual([])
+    await ui.press({ key: `fix:2026-10-13|${W}/room/app-a` })
+    await ui.input({ key: 'adjust', text: '15', kind: 'submit' })
+    expect(await days(ui)).toEqual(['Mon Oct 12 0h 20min', 'Tue Oct 13 0h 55min *'])
+  })
+}
+
+test('a correction is kept in the store, survives the day closing and applies to every session', { options: { language: 'pt' } }, async ($, on) => {
+  const store: Record<string, unknown> = {
+    'session:sess-0': { days: { '2026-10-17': { [`${W}/room/app-b`]: [[at(22, 0, 17), at(22, 30, 17)]] } } },
+  }
+  const w = world(on, at(23, 50, 17), store)
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await ui.press({ key: `pick:${W}/room/app-b` })
+  await ui.press({ key: `fix:2026-10-17|${W}/room/app-b` })
+  await ui.input({ key: 'adjust', text: '-10', kind: 'submit' })
+  expect(store['fix:2026-10-17']).toEqual({ [`${W}/room/app-b`]: -10 * MIN })
+  await w.clock.advance(30 * MIN) // the 17th closes: the other session is compacted into its day total
+  expect(store['session:sess-0']).toBeUndefined()
+  expect(store['day:2026-10-17']).toEqual({ [`${W}/room/app-b`]: 30 * MIN })
+  expect(await days(ui)).toEqual(['sáb 17/10 0h 20min *'])
+  expect(await tree(ui)).toEqual([`· ${W}/room/app-b 0h 20min`])
+})
+// ---- end #9 ----

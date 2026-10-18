@@ -6,7 +6,7 @@ import type { Filter } from '../types'
 import { dayLabel, filters, strings, type Lang } from './i18n'
 import { folderName } from './status'
 import { fmt } from './time'
-import type { Node } from './tree'
+import type { FolderDay, Node } from './tree'
 
 export type PanelArgs = {
   roots: Node[]
@@ -19,15 +19,24 @@ export type PanelArgs = {
   onPause: () => unknown
   // #5 days and filters
   filter: Filter
-  /** The selected folder's path and its days in the period, oldest first. */
-  selected: { path: string; days: readonly [string, number][] } | null
+  /** The selected folder's path and its days in the period, oldest first, each project's time on them. */
+  selected: { path: string; days: readonly FolderDay[] } | null
   onFilter: (filter: Filter) => unknown
   /** Selects a folder, or clears the selection when it is the selected one. */
   onPick: (path: string) => unknown
+  // #9 corrections
+  /** The project day whose correction line is open, `<day>|<project>`. */
+  fixing: string | null
+  /** Opens the correction line of a project day, or closes it when it is the open one. */
+  onFix: (target: string) => unknown
+  /** The minutes typed (`+15`, `-30`) for the open project day. */
+  onAdjust: (text: string) => unknown
+  /** Zeroes the open project day. */
+  onDelete: () => unknown
 }
 
 export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderElement {
-  const { roots, collapsed, lang, onToggle, paused, onPause, filter, selected, onFilter, onPick } = args
+  const { roots, collapsed, lang, onToggle, paused, onPause, filter, selected, onFilter, onPick, fixing, onFix, onAdjust, onDelete } = args
   const { Box, Text, Button } = ui
   const s = strings[lang]
 
@@ -87,22 +96,56 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     return [row, ...(isFolder && isOpen ? n.children.flatMap(c => rows(c, depth + 1)) : [])]
   }
 
+  // #9: a project's time on a day, pressed to open its correction line; `*` marks a corrected one.
+  const mark = (corrected: boolean) => (corrected ? <Text color="warning"> *</Text> : '')
+  const fixable = (day: string, project: string, ms: number, corrected: boolean) => (
+    <Button key={`fix:${day}|${project}`} plain onPress={() => void onFix(`${day}|${project}`)}>
+      <Text inverse={fixing === `${day}|${project}`}>{fmt(ms)}</Text>
+      {mark(corrected)}
+    </Button>
+  )
+  // The correction line under the open row: minutes to add or subtract (no field on mobile), and delete.
+  const fixer = (indent: number) => (
+    <Box key="fixer" flexDirection="row" gap={2} paddingLeft={indent}>
+      {'Input' in ui ? <ui.Input key="adjust" label={s.adjust} placeholder={s.adjustHint} onSubmit={v => void onAdjust(v)} /> : null}
+      <Button key="delete" onPress={() => void onDelete()}>
+        {s.deleteDay}
+      </Button>
+    </Box>
+  )
+
+  // A day of the selected project takes the correction on its own row; a folder's day lists its projects.
+  const inside = selected ? (selected.path.endsWith('/') ? selected.path : `${selected.path}/`) : ''
+  const dayRows = (d: FolderDay): RenderElement[] => {
+    const only = d.entries.length === 1 && d.entries[0]?.project === selected?.path ? d.entries[0] : undefined
+    const open = (project: string) => fixing === `${d.day}|${project}`
+    const head = (
+      <Box key={`day:${d.day}`} flexDirection="row" justifyContent="space-between" gap={2} paddingLeft={2}>
+        <Text>{dayLabel(d.day, lang)}</Text>
+        {only ? fixable(d.day, only.project, only.ms, only.corrected) : <Text>{fmt(d.total)}{mark(d.corrected)}</Text>}
+      </Box>
+    )
+    if (only) return [head, ...(open(only.project) ? [fixer(4)] : [])]
+    return [
+      head,
+      ...d.entries.flatMap(e => [
+        <Box key={`entry:${d.day}|${e.project}`} flexDirection="row" justifyContent="space-between" gap={2} paddingLeft={4}>
+          <Text dimColor wrap="truncate-end">{e.project === selected?.path ? folderName(e.project) : e.project.slice(inside.length)}</Text>
+          {fixable(d.day, e.project, e.ms, e.corrected)}
+        </Box>,
+        ...(open(e.project) ? [fixer(6)] : []),
+      ]),
+    ]
+  }
+
   const picked = selected && (
     <Box key="days" flexDirection="column" marginTop={1}>
       <Box key="days-head" flexDirection="row" justifyContent="space-between" gap={2}>
         <Text bold wrap="truncate-end">{folderName(selected.path)}</Text>
-        <Text bold>{fmt(selected.days.reduce((t, [, ms]) => t + ms, 0))}</Text>
+        <Text bold>{fmt(selected.days.reduce((t, d) => t + d.total, 0))}</Text>
       </Box>
-      {selected.days.length ? (
-        selected.days.map(([day, ms]) => (
-          <Box key={`day:${day}`} flexDirection="row" justifyContent="space-between" gap={2} paddingLeft={2}>
-            <Text>{dayLabel(day, lang)}</Text>
-            <Text>{fmt(ms)}</Text>
-          </Box>
-        ))
-      ) : (
-        <Text dimColor>{s.noTime}</Text>
-      )}
+      {selected.days.length ? selected.days.flatMap(dayRows) : <Text dimColor>{s.noTime}</Text>}
+      {selected.days.some(d => d.corrected) ? <Text dimColor>{s.corrected}</Text> : null}
     </Box>
   )
 

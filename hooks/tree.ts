@@ -1,6 +1,7 @@
 // The tree: folders from the disk root down to each project with time, single-child
 // folders without time of their own folded into one node. Pure.
-import type { DayTotals, Days } from '../types'
+import type { DayTotals, Days, Fixes } from '../types'
+import { isCorrected } from './fix'
 import { merge } from './ledger'
 import { total } from './time'
 
@@ -39,13 +40,27 @@ export function projectTotals(days: Readonly<Record<string, DayTotals>>): Record
 export const inPeriod = (days: Readonly<Record<string, DayTotals>>, [from, to]: readonly [string, string]) =>
   Object.fromEntries(Object.entries(days).filter(([d]) => d >= from && d <= to))
 
-/** Each day's time worked in `folder` and every folder inside it, oldest first, days without time left out. */
-export function folderDays(days: Readonly<Record<string, DayTotals>>, folder: string): [string, number][] {
+/** One project's time on one day, inside the selected folder; `corrected` marks a correction (#9). */
+export type Entry = { project: string; ms: number; corrected: boolean }
+export type FolderDay = { day: string; total: number; corrected: boolean; entries: Entry[] }
+
+/**
+ * Each day in `folder` and every folder inside it, oldest first, with each project's time on it
+ * (corrections applied). Days and projects without time are left out unless corrected.
+ */
+export function folderDays(days: Readonly<Record<string, DayTotals>>, folder: string, fixes: Readonly<Fixes> = {}): FolderDay[] {
   const inside = folder.endsWith('/') ? folder : `${folder}/`
   return Object.entries(days)
-    .map(([d, projects]): [string, number] => [d, Object.entries(projects).reduce((n, [p, ms]) => (p === folder || p.startsWith(inside) ? n + ms : n), 0)])
-    .filter(([, ms]) => ms > 0)
-    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([day, projects]): FolderDay => {
+      const entries = Object.entries(projects)
+        .filter(([p]) => p === folder || p.startsWith(inside))
+        .map(([project, ms]) => ({ project, ms, corrected: isCorrected(fixes, day, project) }))
+        .filter(e => e.ms > 0 || e.corrected)
+        .sort((a, b) => a.project.localeCompare(b.project))
+      return { day, total: entries.reduce((n, e) => n + e.ms, 0), corrected: entries.some(e => e.corrected), entries }
+    })
+    .filter(d => d.entries.length)
+    .sort((a, b) => (a.day < b.day ? -1 : 1))
 }
 
 type Raw = { path: string; name: string; own: number; children: Map<string, Raw> }

@@ -22,6 +22,11 @@ export const strings = {
     pause: '⏸ Pause',
     resume: '▶ Resume',
     paused: 'Paused: this session is not counting time.',
+    // Corrections (#9).
+    adjust: 'Add or subtract',
+    adjustHint: '+15 or -30 min',
+    deleteDay: 'Delete this day',
+    corrected: '* corrected by hand',
   },
   pt: {
     today: 'hoje',
@@ -36,6 +41,10 @@ export const strings = {
     pause: '⏸ Pausar',
     resume: '▶ Retomar',
     paused: 'Em pausa: esta sessão não está contando tempo.',
+    adjust: 'Somar ou subtrair',
+    adjustHint: '+15 ou -30 min',
+    deleteDay: 'Apagar este dia',
+    corrected: '* corrigido à mão',
   },
 } satisfies Record<Lang, Record<string, string>>
 

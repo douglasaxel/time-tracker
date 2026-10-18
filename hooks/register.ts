@@ -3,7 +3,8 @@
 // every hook passes `next(e)` on unchanged.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
-import type { DayTotals, Days, Rec, SessionRecord } from '../types'
+import type { DayTotals, Days, Fixes, Rec, SessionRecord } from '../types'
+import { applyFixes, fixKey, nextFix, parseMinutes } from './fix'
 import { isPortuguese, strings, type Lang } from './i18n'
 import { panel } from './panel'
 import { statusText } from './status'
@@ -117,7 +118,7 @@ let closed: Record<string, DayTotals> = {}
 /** Reads every session and closed-day key, compacts the closed days, and refreshes `others`. */
 async function sync($: EngineInterface, rec: Rec, now: number) {
   const entries: Record<string, unknown> = {}
-  for (const k of await $.store.keys()) if (/^(session|day):/.test(k)) entries[k] = await $.store.get(k)
+  for (const k of await $.store.keys()) if (/^(session|day|fix):/.test(k)) entries[k] = await $.store.get(k)
   const own = rec.id ? sessionKey(rec.id) : ''
   if (own) entries[own] = { days: withLive(rec.days, rec.live) }
   const plan = ledger(entries, own, dayKey(now - idleMs - MIN))
@@ -126,6 +127,8 @@ async function sync($: EngineInterface, rec: Rec, now: number) {
   others = plan.others
   const days = [...Object.entries(entries).filter(([k]) => k.startsWith('day:')), ...plan.set]
   closed = Object.fromEntries(days.map(([k, v]) => [k.slice('day:'.length), v as DayTotals]))
+  const fixes = Object.entries(entries).filter(([k]) => k.startsWith('fix:'))
+  await update($, fixesAtom, () => Object.fromEntries(fixes.map(([k, v]) => [k.slice('fix:'.length), v as DayTotals])))
 }
 // ---- end #4 ----
 
@@ -149,6 +152,25 @@ async function togglePause($: EngineInterface) {
   await showStatus($, rec, now)
 }
 // --- end #8
+
+// --- #9 corrections: each corrected day's key `fix:<day>` (fix.ts), read by every session at each sync.
+const fixesAtom = atom({ plugin: 'time-tracker', key: 'fixes' } as const, {} as Fixes)
+const fixingAtom = atom({ plugin: 'time-tracker', key: 'fixing' } as const, null)
+
+/** Deletes or adjusts the open project day, re-reading its key so another session's correction stays. */
+async function correct($: EngineInterface, change: number | 'delete' | undefined) {
+  const target = await read($, fixingAtom)
+  if (change === undefined || !target) return
+  const at = target.indexOf('|')
+  const [day, project] = [target.slice(0, at), target.slice(at + 1)]
+  const rec = await read($, recAtom)
+  const measured = dayTotals(withLive(rec.days, rec.live), others, closed)[day]?.[project] ?? 0
+  const stored = ((await $.store.get(fixKey(day))) ?? {}) as DayTotals
+  const value = { ...stored, [project]: nextFix(stored[project], measured, change) }
+  await $.store.set(fixKey(day), value)
+  await update($, fixesAtom, f => ({ ...f, [day]: value }))
+}
+// --- end #9
 
 const turnKey = (e: { turnId: string; agentId?: string }) => `${e.agentId ?? 'main'}:${e.turnId}`
 
@@ -226,7 +248,8 @@ export const register: Register = (on, options) => {
     const rec = await read($, recAtom)
     // #5: the days in the chosen period, and the selected folder's days among them.
     const filter = await read($, filterAtom)
-    const days = inPeriod(dayTotals(withLive(rec.days, rec.live), others, closed), period(filter, await $.clock.now()))
+    const fixes = await read($, fixesAtom) // #9: shown time is measured plus corrections
+    const days = inPeriod(applyFixes(dayTotals(withLive(rec.days, rec.live), others, closed), fixes), period(filter, await $.clock.now()))
     const selected = await read($, selectedAtom)
     return panel($.ui.resolve(e), {
       roots: buildTree(projectTotals(days)),
@@ -236,9 +259,13 @@ export const register: Register = (on, options) => {
       paused: await read($, pausedAtom),
       onPause: () => quiet(togglePause($)),
       filter,
-      selected: selected ? { path: selected, days: folderDays(days, selected) } : null,
+      selected: selected ? { path: selected, days: folderDays(days, selected, fixes) } : null,
       onFilter: f => update($, filterAtom, () => f),
       onPick: path => update($, selectedAtom, s => (s === path ? null : path)),
+      fixing: await read($, fixingAtom),
+      onFix: target => update($, fixingAtom, t => (t === target ? null : target)),
+      onAdjust: text => quiet(correct($, parseMinutes(text))),
+      onDelete: () => quiet(correct($, 'delete')),
     })
   })
   // --- end /horas panel

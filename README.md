@@ -16,6 +16,8 @@ The project is the session's project root: after a `/cd`, new time goes to the n
 
 Time is split by local day: an activity that crosses midnight counts its part on each day. The filters at the top (Today, Week from Monday to Sunday, Month, All; keys 1 to 4 while the panel has the focus) set the period the tree and the totals cover. Pressing a folder's time selects it and lists its days in the period with each day's time; pressing it again clears the selection.
 
+Each day lists the time of each project inside the selected folder. Pressing a project's time on a day opens its correction: type minutes to add or subtract (`+15`, `-30`) or press **Delete this day** to zero it (mobile has the delete only). The time shown everywhere is the measured time plus the corrections, never below zero, and a corrected day is marked `*`. Corrections are kept per day under `fix:<YYYY-MM-DD>` (project to minutes added, in ms), apart from the measured time, so compaction leaves them alone.
+
 At the top, **Pause** stops the count for the current session until **Resume**; other sessions keep counting. While paused the status line shows `⏸` instead of `⏱`.
 
 ## Install
