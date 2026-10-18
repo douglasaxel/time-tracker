@@ -27,6 +27,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}, isEnv
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('classic.Stop', () => ({}))
   return { clock, statuses, session, store, status: () => statuses.at(-1) }
 }
 
@@ -206,4 +207,24 @@ test('compacting again, or by two sessions at once, keeps the same total', { opt
   await startSession($)
   await w.clock.advance(MIN)
   expect(w.store).toEqual({ 'day:2026-10-17': { 'C:/work/room/app-a': 90 * MIN }, 'session:sess-1': { days: {} } })
+})
+
+test('background work keeps the session active, and the idle limit runs from its end', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  await startSession($)
+  await interact($, w, 't1', 1)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'subagent', status: 'running', description: 'review' }] })
+  await w.clock.advance(30 * MIN)
+  expect(w.status()).toBe('⏱ 0h 31min hoje · app-a')
+
+  // The task ends and wakes the session; its turn ends with nothing left in background.
+  await $.prompt.submit({ text: 'done', wait: false, origin: { kind: 'task-notification' } })
+  await $.turn.start({ text: 'done', turnId: 't2' })
+  await $.turn.complete({ answer: 'ok', durationMs: 0, isAborted: false, turnId: 't2', reason: 'answer' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [] })
+  await w.clock.advance(9 * MIN)
+  await interact($, w, 't3', 1)
+  expect(w.status()).toBe('⏱ 0h 41min hoje · app-a')
+  await w.clock.advance(15 * MIN)
+  expect(w.status()).toBe('⏱ 0h 41min hoje · app-a')
 })
