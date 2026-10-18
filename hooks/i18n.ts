@@ -18,6 +18,10 @@ export const strings = {
     // #5 days and filters
     noTime: 'No time worked in this period.',
     pickHint: 'Press a time to see its days.',
+    // Manual pause (#8).
+    pause: '⏸ Pause',
+    resume: '▶ Resume',
+    paused: 'Paused: this session is not counting time.',
   },
   pt: {
     today: 'hoje',
@@ -29,6 +33,9 @@ export const strings = {
     empty: 'Nenhum tempo trabalhado ainda. O tempo conta enquanto você trabalha com o Claude num projeto.',
     noTime: 'Nenhum tempo trabalhado neste período.',
     pickHint: 'Pressione um tempo para ver os dias dele.',
+    pause: '⏸ Pausar',
+    resume: '▶ Retomar',
+    paused: 'Em pausa: esta sessão não está contando tempo.',
   },
 } satisfies Record<Lang, Record<string, string>>
 

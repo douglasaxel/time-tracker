@@ -14,6 +14,9 @@ export type PanelArgs = {
   collapsed: readonly string[]
   lang: Lang
   onToggle: (path: string) => unknown
+  /** This session's manual pause (#8) and what pressing Pause or Resume does. */
+  paused: boolean
+  onPause: () => unknown
   // #5 days and filters
   filter: Filter
   /** The selected folder's path and its days in the period, oldest first. */
@@ -24,9 +27,19 @@ export type PanelArgs = {
 }
 
 export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderElement {
-  const { roots, collapsed, lang, onToggle, filter, selected, onFilter, onPick } = args
+  const { roots, collapsed, lang, onToggle, paused, onPause, filter, selected, onFilter, onPick } = args
   const { Box, Text, Button } = ui
   const s = strings[lang]
+
+  // #8: Pause or Resume first, with the reason the count stands still while paused.
+  const control = (
+    <Box key="control" flexDirection="row" gap={2} marginBottom={1}>
+      <Button key="pause" variant={paused ? 'primary' : 'secondary'} onPress={() => void onPause()}>
+        {paused ? s.resume : s.pause}
+      </Button>
+      {paused ? <Text color="warning">{s.paused}</Text> : null}
+    </Box>
+  )
 
   // One choice of four, so radio marks; digits 1-4 press them while the pane has the focus.
   const bar = (
@@ -42,6 +55,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
   if (!roots.length)
     return (
       <Box flexDirection="column">
+        {control}
         {bar}
         <Text dimColor>{filter === 'all' ? s.empty : s.noTime}</Text>
       </Box>
@@ -94,6 +108,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
 
   return (
     <Box flexDirection="column">
+      {control}
       {bar}
       <Box key="total" flexDirection="row" justifyContent="space-between" gap={2} marginBottom={1}>
         <Text bold>{s.total}</Text>

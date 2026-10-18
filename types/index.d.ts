@@ -38,6 +38,8 @@ declare module 'claude-code' {
       filter: Filter
       /** The folder whose days the /horas panel lists, if any (#5). */
       selected: string | null
+      /** Manual pause of this session (#8): while on, no activity is recorded. */
+      paused: boolean
     }
   }
 }
