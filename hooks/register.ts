@@ -2,7 +2,7 @@
 // The time model is in time.ts, the status text in status.ts. The mod only observes:
 // every hook passes `next(e)` on unchanged.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, Register, RenderSurface, Timer } from 'claude-code'
 import type { DayTotals, Days, Fixes, Rec, SessionRecord } from '../types'
 import { applyFixes, fixKey, nextFix, parseMinutes } from './fix'
 import { isPortuguese, strings, type Lang } from './i18n'
@@ -15,13 +15,30 @@ import { buildTree, dayTotals, folderDays, inPeriod, projectTotals } from './tre
 
 const empty: Rec = { id: null, days: {}, live: null, turns: [] }
 const recAtom = atom({ plugin: 'time-tracker', key: 'rec' } as const, empty)
-const PANE = 'time-tracker' // the /horas panel (#3)
+/** Whether a background task of the session is running, as the last classic.Stop listed. */
+const bgAtom = atom({ plugin: 'time-tracker', key: 'background' } as const, false)
+/** Manual pause, per session in $.state (survives hot reloads): while on, activity records nothing. */
+const pausedAtom = atom({ plugin: 'time-tracker', key: 'paused' } as const, false)
+/** Every session's corrections: the `fix:<day>` keys (fix.ts), read at each sync. */
+const fixesAtom = atom({ plugin: 'time-tracker', key: 'fixes' } as const, {} as Fixes)
+// The /horas panel's state.
+const collapsedAtom = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
+const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'all')
+const selectedAtom = atom({ plugin: 'time-tracker', key: 'selected' } as const, null)
+const fixingAtom = atom({ plugin: 'time-tracker', key: 'fixing' } as const, null)
+const copyAtom = atom({ plugin: 'time-tracker', key: 'copy' } as const, null)
 
-// Module variables reset on every load; register and session.start set them again.
+const PANE = 'time-tracker'
+
+// Module variables reset on every load; register, session.start and sync set them again.
 let idleMs = 10 * MIN
 let lang: Lang = 'en'
 let lastSaved = ''
 let timer: Timer | undefined
+/** The other sessions' days, read from the store when a session id binds and each minute. */
+let others: Days = {}
+/** The closed days' totals, as `sync` last saw them. */
+let closed: Record<string, DayTotals> = {}
 
 const quiet = (p: Promise<unknown>) => p.catch(() => undefined)
 
@@ -37,7 +54,6 @@ async function detectLang($: EngineInterface, option: unknown): Promise<Lang> {
   }
 }
 
-// --- #6 project: /cd and worktree ---
 const slash = (p: string) => {
   const s = p.trim().replace(/\\/g, '/')
   return s.length > 3 ? s.replace(/\/+$/, '') : s
@@ -60,7 +76,6 @@ async function project($: EngineInterface): Promise<string> {
   projectOf.set(root, p)
   return p
 }
-// --- end #6 ---
 
 /** Binds the record to the current session id, picking up what that session already stored. */
 async function ensureSession($: EngineInterface) {
@@ -98,25 +113,22 @@ async function activity($: EngineInterface, edge: { turnStart?: string; turnEnd?
   await showStatus($, rec, now)
 }
 
-/** Each minute: a running turn keeps the session active; otherwise the idle limit may end the activity. */
+/** Each minute: a running turn or background task keeps the session active; otherwise the idle limit may end the activity. */
 async function tick($: EngineInterface) {
   const now = await $.clock.now()
   const busy = (await read($, recAtom)).turns.length > 0 || (await read($, bgAtom))
   const p = busy ? await project($) : ''
   const paused = await read($, pausedAtom)
-  const rec = await update($, recAtom, r => (paused ? r : busy ? touch(r, now, p, idleMs) : expire(r, now, idleMs)))
+  const rec = await update($, recAtom, r => {
+    if (paused) return r
+    return busy ? touch(r, now, p, idleMs) : expire(r, now, idleMs)
+  })
   await persist($, rec)
   await quiet(sync($, rec, now))
   await showStatus($, rec, now)
 }
 
-// ---- #4: sessions in parallel and compaction (logic in ledger.ts) ----
-/** The other sessions' days, read from the store when a session id binds and each minute. */
-let others: Days = {}
-/** The closed days' totals, as `sync` last saw them (read by the /horas panel, #3). */
-let closed: Record<string, DayTotals> = {}
-
-/** Reads every session and closed-day key, compacts the closed days, and refreshes `others`. */
+/** Reads every session, closed-day and correction key, compacts the closed days (ledger.ts), and refreshes `others`. */
 async function sync($: EngineInterface, rec: Rec, now: number) {
   const entries: Record<string, unknown> = {}
   for (const k of await $.store.keys()) if (/^(session|day|fix):/.test(k)) entries[k] = await $.store.get(k)
@@ -131,16 +143,6 @@ async function sync($: EngineInterface, rec: Rec, now: number) {
   const fixes = Object.entries(entries).filter(([k]) => k.startsWith('fix:'))
   await update($, fixesAtom, () => Object.fromEntries(fixes.map(([k, v]) => [k.slice('fix:'.length), v as DayTotals])))
 }
-// ---- end #4 ----
-
-// --- #7 background work: while any background task of the session runs, the session counts as active.
-// classic.Stop lists the work still in flight at each main-turn end; when a task ends it wakes the
-// session (a task-notification prompt), so the next Stop lists what is left.
-const bgAtom = atom({ plugin: 'time-tracker', key: 'background' } as const, false)
-// --- end #7
-
-// --- #8 manual pause: per session in $.state (survives hot reloads); while on, activity records nothing.
-const pausedAtom = atom({ plugin: 'time-tracker', key: 'paused' } as const, false)
 
 /** Pause closes the activity in progress at this moment; Resume lets the next activity count. */
 async function togglePause($: EngineInterface) {
@@ -152,26 +154,26 @@ async function togglePause($: EngineInterface) {
   await persist($, rec)
   await showStatus($, rec, now)
 }
-// --- end #8
-
-// --- #9 corrections: each corrected day's key `fix:<day>` (fix.ts), read by every session at each sync.
-const fixesAtom = atom({ plugin: 'time-tracker', key: 'fixes' } as const, {} as Fixes)
-const fixingAtom = atom({ plugin: 'time-tracker', key: 'fixing' } as const, null)
 
 /** Deletes or adjusts the open project day, re-reading its key so another session's correction stays. */
 async function correct($: EngineInterface, change: number | 'delete' | undefined) {
   const target = await read($, fixingAtom)
   if (change === undefined || !target) return
   const at = target.indexOf('|')
-  const [day, project] = [target.slice(0, at), target.slice(at + 1)]
+  const [day, path] = [target.slice(0, at), target.slice(at + 1)]
   const rec = await read($, recAtom)
-  const measured = dayTotals(withLive(rec.days, rec.live), others, closed)[day]?.[project] ?? 0
+  const measured = dayTotals(withLive(rec.days, rec.live), others, closed)[day]?.[path] ?? 0
   const stored = ((await $.store.get(fixKey(day))) ?? {}) as DayTotals
-  const value = { ...stored, [project]: nextFix(stored[project], measured, change) }
+  const value = { ...stored, [path]: nextFix(stored[path], measured, change) }
   await $.store.set(fixKey(day), value)
   await update($, fixesAtom, f => ({ ...f, [day]: value }))
 }
-// --- end #9
+
+/** Copies the table as drawn; a desktop may refuse the copy, so the outcome is always kept to show. */
+async function copyTable($: EngineInterface, text: string, surface: RenderSurface) {
+  const r = await $.ui.copy({ text, surface }).catch(() => ({ isCopied: false }))
+  await update($, copyAtom, () => ({ ok: r.isCopied, text }))
+}
 
 const turnKey = (e: { turnId: string; agentId?: string }) => `${e.agentId ?? 'main'}:${e.turnId}`
 
@@ -182,7 +184,7 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     await quiet((async () => {
       lang = await detectLang($, options.language)
-      await quiet($.command.register({ name: 'horas', description: strings[lang].paneHint })) // /horas panel (#3)
+      await quiet($.command.register({ name: 'horas', description: strings[lang].paneHint }))
       await ensureSession($)
       await showStatus($, await read($, recAtom), await $.clock.now())
     })())
@@ -224,19 +226,14 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // --- #7 background work
+  // Each main-turn end lists the background work still in flight; a task that ends wakes the
+  // session (a task-notification prompt), so the next Stop lists what is left.
   on('classic.Stop', async ($, e, next) => {
     await quiet(update($, bgAtom, () => (e.background_tasks?.length ?? 0) > 0))
     return next(e)
   })
-  // --- end #7
 
-  // --- /horas panel (#3): the command toggles the pane; the drawing reads the record, so each tick redraws it.
-  const collapsed = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
-  const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'all') // #5
-  const selectedAtom = atom({ plugin: 'time-tracker', key: 'selected' } as const, null) // #5
-  const copyAtom = atom({ plugin: 'time-tracker', key: 'copy' } as const, null) // #10
-
+  // The /horas panel: the command toggles the pane; the drawing reads the record, so each tick redraws it.
   on('command.run', { command: 'horas' }, async $ => {
     if ((await $.ui.panes()).some(p => p.id === PANE)) {
       await $.ui.close({ id: PANE })
@@ -247,38 +244,32 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    // The days in the chosen period, measured plus corrections, and the selected folder's days among them.
     const rec = await read($, recAtom)
-    // #5: the days in the chosen period, and the selected folder's days among them.
     const filter = await read($, filterAtom)
-    const fixes = await read($, fixesAtom) // #9: shown time is measured plus corrections
+    const fixes = await read($, fixesAtom)
     const range = period(filter, await $.clock.now())
     const days = inPeriod(applyFixes(dayTotals(withLive(rec.days, rec.live), others, closed), fixes), range)
     const selected = await read($, selectedAtom)
     const shown = selected ? folderDays(days, selected, fixes) : []
+    const clearCopy = () => update($, copyAtom, () => null)
     return panel($.ui.resolve(e), {
       roots: buildTree(projectTotals(days)),
-      collapsed: await read($, collapsed),
+      collapsed: await read($, collapsedAtom),
       lang,
-      onToggle: path => update($, collapsed, c => (c.includes(path) ? c.filter(p => p !== path) : [...c, path])),
+      onToggle: path => update($, collapsedAtom, c => (c.includes(path) ? c.filter(p => p !== path) : [...c, path])),
       paused: await read($, pausedAtom),
       onPause: () => quiet(togglePause($)),
       filter,
       selected: selected ? { path: selected, days: shown } : null,
-      onFilter: f => Promise.all([update($, filterAtom, () => f), update($, copyAtom, () => null)]),
-      onPick: path => Promise.all([update($, selectedAtom, s => (s === path ? null : path)), update($, copyAtom, () => null)]),
+      onFilter: f => Promise.all([update($, filterAtom, () => f), clearCopy()]),
+      onPick: path => Promise.all([update($, selectedAtom, s => (s === path ? null : path)), clearCopy()]),
       fixing: await read($, fixingAtom),
       onFix: target => update($, fixingAtom, t => (t === target ? null : target)),
       onAdjust: text => quiet(correct($, parseMinutes(text))),
       onDelete: () => quiet(correct($, 'delete')),
       copy: await read($, copyAtom),
-      // #10: the table as drawn; a desktop may refuse the copy, so the outcome is always shown.
-      onCopy: surface =>
-        quiet((async () => {
-          const text = selected ? markdownTable(selected, shown, filter, range, lang) : ''
-          const r = await $.ui.copy({ text, surface }).catch(() => ({ isCopied: false }))
-          await update($, copyAtom, () => ({ ok: r.isCopied, text }))
-        })()),
+      onCopy: surface => quiet(copyTable($, selected ? markdownTable(selected, shown, filter, range, lang) : '', surface)),
     })
   })
-  // --- end /horas panel
 }

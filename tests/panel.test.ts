@@ -131,7 +131,7 @@ test('the tree counts every session once, closed days included', { options: { la
   expect(await tree(ui)).toEqual([`▾ ${W}/room 1h 46min`, '· app-a 0h 31min', '· app-b 1h 15min'])
 })
 
-// ---- #5 days and filters ----
+// ---- days and filters ----
 /** Time on several days: closed days as stored totals, today from another session. */
 const spread = () => ({
   'day:2026-09-30': { [`${W}/room/app-a`]: 40 * MIN },
@@ -196,9 +196,7 @@ test('an activity from 23:50 to 0:10 counts 10 minutes on each day', { options: 
   await ui.press({ key: `pick:${W}/room/app-a` })
   expect(await days(ui)).toEqual(['Sat Oct 17 0h 10min', 'Sun Oct 18 0h 10min'])
 })
-// ---- end #5 ----
-
-// ---- #9 corrections ----
+// ---- corrections ----
 /** The selected folder's rows that take a correction: each project on each day, with its time and mark. */
 async function entries(ui: { findAll: (q: { type: 'Box' }) => Promise<{ key?: string; text: string }[]> }) {
   return (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('entry:')).map(b => b.text.replace(/(\S)(\d+h \d\dmin)/, '$1 $2'))
@@ -263,9 +261,7 @@ test('a correction is kept in the store, survives the day closing and applies to
   expect(await days(ui)).toEqual(['sáb 17/10 0h 20min *'])
   expect(await tree(ui)).toEqual([`· ${W}/room/app-b 0h 20min`])
 })
-// ---- end #9 ----
-
-// ---- #10 copy as Markdown ----
+// ---- copy as Markdown ----
 /** Two projects in `room` this week, seconds and all, and a correction on Tuesday. */
 const report = () => ({
   'day:2026-10-11': { [`${W}/room/app-a`]: 50 * MIN }, // the Sunday before this week: left out
@@ -322,4 +318,3 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.find({ key: 'copied-table' }))?.text).toContain('| Mon Oct 12 | app-b | 3h 00min |')
   })
 }
-// ---- end #10 ----

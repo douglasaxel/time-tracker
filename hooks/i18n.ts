@@ -15,19 +15,19 @@ export const strings = {
     closed: 'Hours panel closed',
     total: 'Total',
     empty: 'No time worked yet. Time counts while you work with Claude in a project.',
-    // #5 days and filters
+    // Days and filters.
     noTime: 'No time worked in this period.',
     pickHint: 'Press a time to see its days.',
-    // Manual pause (#8).
+    // Manual pause.
     pause: '⏸ Pause',
     resume: '▶ Resume',
     paused: 'Paused: this session is not counting time.',
-    // Corrections (#9).
+    // Corrections.
     adjust: 'Add or subtract',
     adjustHint: '+15 or -30 min',
     deleteDay: 'Delete this day',
     corrected: '* corrected by hand',
-    // Copy as Markdown (#10).
+    // Copy as Markdown.
     copy: 'Copy as Markdown',
     copied: 'Copied. Paste it into your hours report.',
     copyFailed: 'The clipboard did not take it. Select the table below and copy it.',
@@ -63,7 +63,6 @@ export const strings = {
   },
 } satisfies Record<Lang, Record<string, string>>
 
-// --- #5 days and filters
 export const filters: Record<Lang, Record<Filter, string>> = {
   en: { today: 'Today', week: 'Week', month: 'Month', all: 'All' },
   pt: { today: 'Hoje', week: 'Semana', month: 'Mês', all: 'Total' },
@@ -78,4 +77,3 @@ export function dayLabel(day: string, lang: Lang): string {
   const wd = weekdays[lang][d.getDay()]
   return lang === 'pt' ? `${wd} ${day.slice(8)}/${day.slice(5, 7)}` : `${wd} ${months[d.getMonth()]} ${d.getDate()}`
 }
-// --- end #5

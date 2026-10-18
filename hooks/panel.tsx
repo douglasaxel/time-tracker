@@ -6,7 +6,7 @@ import type { Filter } from '../types'
 import { dayLabel, filters, strings, type Lang } from './i18n'
 import { folderName } from './status'
 import { fmt } from './time'
-import type { FolderDay, Node } from './tree'
+import { relativeName, type FolderDay, type Node } from './tree'
 
 export type PanelArgs = {
   roots: Node[]
@@ -14,17 +14,15 @@ export type PanelArgs = {
   collapsed: readonly string[]
   lang: Lang
   onToggle: (path: string) => unknown
-  /** This session's manual pause (#8) and what pressing Pause or Resume does. */
+  /** This session's manual pause and what pressing Pause or Resume does. */
   paused: boolean
   onPause: () => unknown
-  // #5 days and filters
   filter: Filter
   /** The selected folder's path and its days in the period, oldest first, each project's time on them. */
   selected: { path: string; days: readonly FolderDay[] } | null
   onFilter: (filter: Filter) => unknown
   /** Selects a folder, or clears the selection when it is the selected one. */
   onPick: (path: string) => unknown
-  // #9 corrections
   /** The project day whose correction line is open, `<day>|<project>`. */
   fixing: string | null
   /** Opens the correction line of a project day, or closes it when it is the open one. */
@@ -33,7 +31,6 @@ export type PanelArgs = {
   onAdjust: (text: string) => unknown
   /** Zeroes the open project day. */
   onDelete: () => unknown
-  // #10 copy as Markdown
   /** The last copy's outcome and table, until the folder or the period changes. */
   copy: { ok: boolean; text: string } | null
   /** Copies the selected folder's table on the surface the press came from. */
@@ -45,7 +42,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
   const { Box, Text, Button } = ui
   const s = strings[lang]
 
-  // #8: Pause or Resume first, with the reason the count stands still while paused.
+  // Pause or Resume first, with the reason the count stands still while paused.
   const control = (
     <Box key="control" flexDirection="row" gap={2} marginBottom={1}>
       <Button key="pause" variant={paused ? 'primary' : 'secondary'} onPress={() => void onPause()}>
@@ -101,7 +98,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     return [row, ...(isFolder && isOpen ? n.children.flatMap(c => rows(c, depth + 1)) : [])]
   }
 
-  // #9: a project's time on a day, pressed to open its correction line; `*` marks a corrected one.
+  // A project's time on a day, pressed to open its correction line; `*` marks a corrected one.
   const mark = (corrected: boolean) => (corrected ? <Text color="warning"> *</Text> : '')
   const fixable = (day: string, project: string, ms: number, corrected: boolean) => (
     <Button key={`fix:${day}|${project}`} plain onPress={() => void onFix(`${day}|${project}`)}>
@@ -120,9 +117,8 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
   )
 
   // A day of the selected project takes the correction on its own row; a folder's day lists its projects.
-  const inside = selected ? (selected.path.endsWith('/') ? selected.path : `${selected.path}/`) : ''
-  const dayRows = (d: FolderDay): RenderElement[] => {
-    const only = d.entries.length === 1 && d.entries[0]?.project === selected?.path ? d.entries[0] : undefined
+  const dayRows = (d: FolderDay, folder: string): RenderElement[] => {
+    const only = d.entries.length === 1 && d.entries[0]?.project === folder ? d.entries[0] : undefined
     const open = (project: string) => fixing === `${d.day}|${project}`
     const head = (
       <Box key={`day:${d.day}`} flexDirection="row" justifyContent="space-between" gap={2} paddingLeft={2}>
@@ -135,7 +131,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
       head,
       ...d.entries.flatMap(e => [
         <Box key={`entry:${d.day}|${e.project}`} flexDirection="row" justifyContent="space-between" gap={2} paddingLeft={4}>
-          <Text dimColor wrap="truncate-end">{e.project === selected?.path ? folderName(e.project) : e.project.slice(inside.length)}</Text>
+          <Text dimColor wrap="truncate-end">{relativeName(e.project, folder)}</Text>
           {fixable(d.day, e.project, e.ms, e.corrected)}
         </Box>,
         ...(open(e.project) ? [fixer(6)] : []),
@@ -143,7 +139,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     ]
   }
 
-  // #10: the copy and what came of it, said next to the button; a refused copy shows the table to copy by hand.
+  // The copy and what came of it, said next to the button; a refused copy shows the table to copy by hand.
   const copyRow = (
     <Box key="copy-row" flexDirection="row" gap={2} marginTop={1}>
       <Button key="copy" onPress={e => void onCopy(e.surface)}>
@@ -159,7 +155,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
         <Text bold wrap="truncate-end">{folderName(selected.path)}</Text>
         <Text bold>{fmt(selected.days.reduce((t, d) => t + d.total, 0))}</Text>
       </Box>
-      {selected.days.length ? selected.days.flatMap(dayRows) : <Text dimColor>{s.noTime}</Text>}
+      {selected.days.length ? selected.days.flatMap(d => dayRows(d, selected.path)) : <Text dimColor>{s.noTime}</Text>}
       {selected.days.some(d => d.corrected) ? <Text dimColor>{s.corrected}</Text> : null}
       {selected.days.length ? copyRow : null}
       {copy && !copy.ok ? (

@@ -3,6 +3,7 @@
 import type { DayTotals, Days, Fixes } from '../types'
 import { isCorrected } from './fix'
 import { merge } from './ledger'
+import { folderName } from './status'
 import { total } from './time'
 
 export type Node = {
@@ -40,7 +41,13 @@ export function projectTotals(days: Readonly<Record<string, DayTotals>>): Record
 export const inPeriod = (days: Readonly<Record<string, DayTotals>>, [from, to]: readonly [string, string]) =>
   Object.fromEntries(Object.entries(days).filter(([d]) => d >= from && d <= to))
 
-/** One project's time on one day, inside the selected folder; `corrected` marks a correction (#9). */
+const withSlash = (folder: string) => (folder.endsWith('/') ? folder : `${folder}/`)
+
+/** How a row inside `folder` names `project`: its path relative to the folder, or the folder's name. */
+export const relativeName = (project: string, folder: string) =>
+  project === folder ? folderName(folder) : project.slice(withSlash(folder).length)
+
+/** One project's time on one day, inside the selected folder; `corrected` marks a correction. */
 export type Entry = { project: string; ms: number; corrected: boolean }
 export type FolderDay = { day: string; total: number; corrected: boolean; entries: Entry[] }
 
@@ -49,7 +56,7 @@ export type FolderDay = { day: string; total: number; corrected: boolean; entrie
  * (corrections applied). Days and projects without time are left out unless corrected.
  */
 export function folderDays(days: Readonly<Record<string, DayTotals>>, folder: string, fixes: Readonly<Fixes> = {}): FolderDay[] {
-  const inside = folder.endsWith('/') ? folder : `${folder}/`
+  const inside = withSlash(folder)
   return Object.entries(days)
     .map(([day, projects]): FolderDay => {
       const entries = Object.entries(projects)

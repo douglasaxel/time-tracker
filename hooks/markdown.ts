@@ -1,9 +1,9 @@
-// Copy as Markdown (#10): the selected folder's days in the period as a table for the hours report. Pure.
+// Copy as Markdown: the selected folder's days in the period as a table for the hours report. Pure.
 import type { Filter } from '../types'
 import { dayLabel, filters, strings, type Lang } from './i18n'
 import { folderName } from './status'
 import { fmt } from './time'
-import type { FolderDay } from './tree'
+import { relativeName, type FolderDay } from './tree'
 
 /** A day key as the title writes it: `12/10/2026` or `2026-10-12`. */
 const date = (day: string, lang: Lang) => (lang === 'pt' ? `${day.slice(8)}/${day.slice(5, 7)}/${day.slice(0, 4)}` : day)
@@ -17,12 +17,8 @@ export function markdownTable(folder: string, days: readonly FolderDay[], filter
   const s = strings[lang]
   const [from, to] = filter === 'all' ? [days[0]?.day ?? '', days.at(-1)?.day ?? ''] : range
   const when = from === to ? date(from, lang) : `${date(from, lang)} ${s.to} ${date(to, lang)}`
-  const inside = folder.endsWith('/') ? folder : `${folder}/`
   const rows = days.flatMap(d =>
-    d.entries.map(e => {
-      const project = e.project === folder ? folderName(folder) : e.project.slice(inside.length)
-      return `| ${dayLabel(d.day, lang)} | ${project} | ${fmt(e.ms)}${e.corrected ? ' *' : ''} |`
-    }),
+    d.entries.map(e => `| ${dayLabel(d.day, lang)} | ${relativeName(e.project, folder)} | ${fmt(e.ms)}${e.corrected ? ' *' : ''} |`),
   )
   const total = fmt(days.reduce((t, d) => t + d.total, 0))
   return [

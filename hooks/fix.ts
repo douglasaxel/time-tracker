@@ -1,4 +1,4 @@
-// Corrections (#9): a manual change to one project's time on one day. Pure.
+// Corrections: a manual change to one project's time on one day. Pure.
 import type { DayTotals, Fixes } from '../types'
 import { MIN } from './time'
 

@@ -73,7 +73,7 @@ export function touch(rec: Rec, now: number, project: string, idleMs: number): R
   return { ...rec, days: withLive(rec.days, ended), live: { project, start: now, last: now } }
 }
 
-/** A manual pause at `now`: the activity in progress closes at that moment (#8). */
+/** A manual pause at `now`: the activity in progress closes at that moment. */
 export function pause(rec: Rec, now: number, project: string, idleMs: number): Rec {
   const r = touch(rec, now, project, idleMs)
   return { ...r, days: withLive(r.days, r.live), live: null }

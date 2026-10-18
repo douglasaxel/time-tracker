@@ -10,7 +10,7 @@ export type SessionRecord = { days: Days }
 /** What `$.store` holds under `day:<YYYY-MM-DD>` for a closed day: project path -> ms worked, all sessions united. */
 export type DayTotals = Record<string, number>
 
-/** Corrections (#9), as the `fix:<YYYY-MM-DD>` keys hold them: day -> project path -> ms added (negative subtracts). */
+/** Corrections, as the `fix:<YYYY-MM-DD>` keys hold them: day -> project path -> ms added (negative subtracts). */
 export type Fixes = Record<string, DayTotals>
 
 /** The activity in progress: from `start` to the last active instant `last`. */
@@ -37,17 +37,17 @@ declare module 'claude-code' {
       background: boolean
       /** Folder paths collapsed in the /horas panel. */
       collapsed: string[]
-      /** The /horas panel's period (#5). */
+      /** The /horas panel's period. */
       filter: Filter
-      /** The folder whose days the /horas panel lists, if any (#5). */
+      /** The folder whose days the /horas panel lists, if any. */
       selected: string | null
-      /** Manual pause of this session (#8): while on, no activity is recorded. */
+      /** Manual pause of this session: while on, no activity is recorded. */
       paused: boolean
-      /** Every session's corrections (#9), read from the store. */
+      /** Every session's corrections, read from the store. */
       fixes: Fixes
-      /** The project day whose correction line is open, `<YYYY-MM-DD>|<project>` (#9). */
+      /** The project day whose correction line is open, `<YYYY-MM-DD>|<project>`. */
       fixing: string | null
-      /** The last Copy as Markdown (#10): whether the clipboard took it, and the table copied. */
+      /** The last Copy as Markdown: whether the clipboard took it, and the table copied. */
       copy: { ok: boolean; text: string } | null
     }
   }
