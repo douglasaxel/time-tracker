@@ -121,7 +121,8 @@ test('after /clear the new session starts its own key', { options: { language: '
   await interact($, w, 't2', 3)
   await w.clock.advance(MIN)
   expect(Object.keys(w.store).sort()).toEqual(['session:sess-1', 'session:sess-2'])
-  expect(w.status()).toBe('⏱ 0h 03min hoje · app-a')
+  // The day is the union of both sessions: 09:00-09:05 and 09:05-09:08.
+  expect(w.status()).toBe('⏱ 0h 08min hoje · app-a')
 })
 
 test('the status line speaks the chosen language', { options: { language: 'en' } }, async ($, on) => {
@@ -136,4 +137,73 @@ test('auto language follows the system locale', async ($, on) => {
   const w = world(on, at(9, 0), {}, false)
   await startSession($)
   expect(w.status()).toBe('⏱ 0h 00min hoje · app-a')
+})
+
+const day = (ms: number) => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Another session's key, as that session would have written it: `[project folder, start, end]` stretches. */
+const other = (...stretches: [string, number, number][]) => {
+  const days: Record<string, Record<string, [number, number][]>> = {}
+  for (const [p, s, e] of stretches) ((days[day(s)] ??= {})[`C:/work/room/${p}`] ??= []).push([s, e])
+  return { days }
+}
+
+for (const [name, from, to, shown] of [
+  ['partial overlap', at(9, 0), at(9, 20), '0h 30min'],
+  ['total overlap', at(9, 0), at(10, 0), '1h 00min'],
+  ['no overlap', at(8, 0), at(8, 30), '0h 50min'],
+] as const) {
+  test(`two sessions in the same project count the period once: ${name}`, { options: { language: 'pt' } }, async ($, on) => {
+    const w = world(on, at(9, 10), { 'session:sess-0': other(['app-a', from, to]) })
+    await startSession($)
+    await interact($, w, 't1', 20)
+    expect(w.status()).toBe(`⏱ ${shown} hoje · app-a`)
+  })
+}
+
+test('sessions in different projects at the same time count for each project', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0), { 'session:sess-0': other(['app-b', at(9, 0), at(9, 20)]) })
+  await startSession($)
+  await interact($, w, 't1', 20)
+  expect(w.status()).toBe('⏱ 0h 20min hoje · app-a')
+  w.session.root = 'C:/work/room/app-b'
+  await w.clock.advance(12 * MIN)
+  expect(w.status()).toBe('⏱ 0h 20min hoje · app-b')
+})
+
+const yesterday = (h: number, m: number) => at(h, m, 17)
+
+test('closed days become one total per project and day, and old session keys go', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0), {
+    'session:sess-0': other(['app-a', yesterday(10, 0), yesterday(11, 0)], ['app-b', yesterday(14, 0), yesterday(14, 30)]),
+    'session:sess-x': other(['app-a', yesterday(10, 30), yesterday(11, 30)]),
+    // Ran past midnight and still holds today: its key stays, its closed day is compacted.
+    'session:sess-y': other(['app-a', yesterday(23, 0), at(0, 0)], ['app-a', at(0, 0), at(0, 15)]),
+  })
+  await startSession($)
+  expect(w.store['day:2026-10-17']).toEqual({ 'C:/work/room/app-a': 150 * MIN, 'C:/work/room/app-b': 30 * MIN })
+  expect(Object.keys(w.store).sort()).toEqual(['day:2026-10-17', 'session:sess-y'])
+  expect(w.status()).toBe('⏱ 0h 15min hoje · app-a')
+})
+
+test('a day is not closed until the idle limit has passed after midnight', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(0, 5), { 'session:sess-0': other(['app-a', yesterday(23, 50), at(0, 0)]) })
+  await startSession($)
+  expect(Object.keys(w.store)).toEqual(['session:sess-0'])
+  await w.clock.advance(10 * MIN)
+  expect(Object.keys(w.store).sort()).toEqual(['day:2026-10-17', 'session:sess-1'])
+})
+
+test('compacting again, or by two sessions at once, keeps the same total', { options: { language: 'pt' } }, async ($, on) => {
+  // Another session already wrote the day's total but has not removed the keys yet; one key came back later.
+  const w = world(on, at(9, 0), {
+    'day:2026-10-17': { 'C:/work/room/app-a': 90 * MIN },
+    'session:sess-x': other(['app-a', yesterday(10, 30), yesterday(11, 30)]),
+  })
+  await startSession($)
+  await w.clock.advance(MIN)
+  expect(w.store).toEqual({ 'day:2026-10-17': { 'C:/work/room/app-a': 90 * MIN }, 'session:sess-1': { days: {} } })
 })

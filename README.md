@@ -6,7 +6,7 @@ A Claude Code mod that measures the time worked on each project, on its own, and
 ⏱ 2h 14min hoje · app-a
 ```
 
-Time counts while Claude answers and across short pauses between interactions; a gap longer than the idle limit does not count. Each session records its own intervals per project and local day in the plugin store.
+Time counts while Claude answers and across short pauses between interactions; a gap longer than the idle limit does not count. Each session records its own intervals per project and local day in the plugin store (`session:<id>`); sessions open at the same time in one project count the period once. Once a day is closed, it is compacted into one total per project (`day:<YYYY-MM-DD>`) and the old session keys are removed.
 
 ## Install
 
