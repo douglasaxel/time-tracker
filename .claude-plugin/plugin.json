@@ -1,6 +1,6 @@
 {
   "name": "time-tracker",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Measures the time worked on each project with Claude Code, shows today's time in the status line, and opens the /horas panel with the time per folder and day, corrections and a Markdown copy for hours reports.",
   "author": {
     "name": "douglasaxel",

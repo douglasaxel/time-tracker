@@ -39,7 +39,7 @@ export type SessionMeasurement = {
 /** The /horas panel's period: today, this week (Monday to Sunday), this month, or every day. */
 export type Filter = 'today' | 'week' | 'month' | 'all'
 
-/** What the /horas panel shows: the days with each project's time, or the tree of folders. */
+/** What the /horas panel shows: the timesheet of projects by day, or the tree of folders. */
 export type View = 'days' | 'tree'
 
 declare module 'claude-code' {
@@ -53,6 +53,9 @@ declare module 'claude-code' {
       /** The /horas panel's period. */
       filter: Filter
       view: View
+      /** Periods before the current one the panel shows: -1 is last week, on the week filter. */
+      offset: number
+      correctionsOpen: boolean
       /** The folder whose days the /horas panel lists, if any. */
       selected: string | null
       /** Manual pause of this session: while on, no activity is recorded. */

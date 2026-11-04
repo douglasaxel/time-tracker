@@ -49,9 +49,10 @@ const earlier = (projects: Record<string, number>) => ({
 const startSession = ($: TestEngine) => $.session.start({ cwd: `${W}/room/app-a`, surface: 'terminal', isInteractive: true })
 const horas = ($: TestEngine) => $.command.run({ command: 'horas', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
 
-/** The tree over every day: the panel opens on this week's days. */
+/** The tree over every day, the list of days to correct open: the panel opens on this week's sheet. */
 async function showTree(ui: { press: (t: { key: string }) => Promise<unknown> }) {
   await ui.press({ key: 'filter:all' })
+  await ui.press({ key: 'corrections-toggle' })
   await ui.press({ key: 'view:tree' })
 }
 
@@ -127,7 +128,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world(on, at(9, 0))
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
-    await showTree(ui)
+    await ui.press({ key: 'filter:all' })
     expect(await tree(ui)).toEqual([])
     expect((await ui.find({ type: 'Text', text: /No time worked yet/ }))?.text).toBeDefined()
   })
@@ -137,10 +138,10 @@ test('the panel redraws each minute while the session is active', { options: { l
   const w = world(on, at(9, 0), earlier({ [`${W}/room/app-b`]: 30 }))
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
-  await showTree(ui)
   await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
   await $.turn.start({ text: 'go', turnId: 't1' })
   await w.clock.advance(20 * MIN)
+  await ui.press({ key: 'view:tree' })
   expect(await tree(ui)).toEqual([`▾ ${WIN}\\room 0h 50min`, '· app-a 0h 20min', '· app-b 0h 30min'])
   expect((await ui.find({ key: 'total' }))?.text).toBe('Total0h 50min')
   await w.clock.advance(MIN)
@@ -222,14 +223,15 @@ test('an activity from 23:50 to 0:10 counts 10 minutes on each day', { options: 
   const w = world(on, at(23, 50, 17))
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
-  await showTree(ui)
   await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
   await $.turn.start({ text: 'go', turnId: 't1' })
   await w.clock.advance(20 * MIN)
+  await ui.press({ key: 'view:tree' })
   await ui.press({ key: 'filter:today' })
   expect(await tree(ui)).toEqual([`· ${WIN}\\room\\app-a 0h 10min`])
   await ui.press({ key: 'filter:all' })
   await ui.press({ key: `pick:${W}/room/app-a` })
+  await ui.press({ key: 'corrections-toggle' })
   expect(await days(ui)).toEqual(['Sun Oct 18 0h 10min', 'Sat Oct 17 0h 10min'])
 })
 // ---- corrections ----
@@ -383,36 +385,89 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
-// ---- the days view ----
-for (const surface of ['terminal', 'desktop'] as const) {
-  test(`${surface}: the panel opens on this week's days, newest first, with each project's time named from their common folder`, { options: { language: 'pt' } }, async ($, on) => {
-    world(on, at(9, 0), {
-      'day:2026-10-11': { [`${W}/room/app-a`]: 90 * MIN }, // the Sunday before this week: left out
-      'day:2026-10-12': { [`${W}/room/app-a`]: 20 * MIN, [`${W}/personal/site`]: 15 * MIN },
-      'day:2026-10-13': { [`${W}/room/app-a`]: 40 * MIN },
-    })
-    await startSession($)
-    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
-    expect(await days(ui)).toEqual(['ter 13/10 0h 40min', 'seg 12/10 0h 35min'])
-    expect(await entries(ui)).toEqual(['room\\app-a 0h 40min', 'room\\app-a 0h 20min', 'personal\\site 0h 15min'])
-    expect(await tree(ui)).toEqual([])
-  })
+// ---- the timesheet ----
+/** A sheet line as the person reads it: its name, then each cell. */
+async function sheetRow(ui: { find: (q: { key: string }) => Promise<{ text: string } | undefined> }, key: string) {
+  return ((await ui.find({ key }))?.text ?? '').trim().split(/\s+/)
 }
 
-test('terminal: a day bar is as long as its hours against the longest day, split by project', { options: { language: 'en' } }, async ($, on) => {
-  world(on, at(9, 0), twoProjects())
-  await startSession($)
-  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 42 } as never })
-  const blocks = async (day: string) => ((await ui.find({ key: `block:${day}` }))?.text.match(/█/g) ?? []).length
-  expect(await blocks('2026-10-13')).toBe(40) // the longest day fills the width
-  expect(await blocks('2026-10-12')).toBe(35) // 20 + 15 of its 40 minutes
+const sheetDays = () => ({
+  'day:2026-10-05': { [`${W}/room/app-a`]: 30 * MIN }, // the week before
+  'day:2026-10-11': { [`${W}/room/app-a`]: 90 * MIN }, // the Sunday before this week
+  'day:2026-10-12': { [`${W}/room/app-a`]: 20 * MIN, [`${W}/personal/site`]: 75 * MIN },
+  'day:2026-10-13': { [`${W}/room/app-a`]: 40 * MIN },
 })
 
-test('desktop: each day with time draws one bar with a part per project', { options: { language: 'en' } }, async ($, on) => {
-  world(on, at(9, 0), twoProjects())
+test('terminal: the panel opens on this week: projects by day, the most time first, with totals', { options: { language: 'pt' } }, async ($, on) => {
+  world(on, at(9, 0), sheetDays())
   await startSession($)
-  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'desktop', component: 'Pane', requestId: PANE, props: { bodyColumns: 42 } as never })
-  const bars = (await ui.findAll({ type: 'Svg' })) as unknown as { props?: { source?: string }; source?: string }[]
-  const parts = bars.map(b => ((b.props?.source ?? b.source ?? '').match(/<rect/g) ?? []).length)
-  expect(parts).toEqual([1, 2])
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+  const row = (key: string) => sheetRow(ui, key)
+  expect(await row('sheet-head')).toEqual(['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom', 'Total'])
+  expect(await row('sheet-sub')).toEqual(['12', '13', '14', '15', '16', '17', '18'])
+  expect(await row(`sheet:${W}/personal/site`)).toEqual(['site', '1h15', '·', '·', '·', '·', '·', '·', '1h15'])
+  expect(await row(`sheet:${W}/room/app-a`)).toEqual(['app-a', '20min', '40min', '·', '·', '·', '·', '·', '1h00'])
+  expect(await row('sheet-total')).toEqual(['Total', '1h35', '40min', '·', '·', '·', '·', '·', '2h15'])
+  expect(await tree(ui)).toEqual([])
+  expect(await days(ui)).toEqual([])
+})
+
+test('terminal: the arrows walk the weeks and stop at the current one', { options: { language: 'pt' } }, async ($, on) => {
+  world(on, at(9, 0), sheetDays())
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+  const period = async () => (await ui.find({ key: 'period' }))?.text
+  expect(await period()).toContain('12/10 a 18/10')
+  expect(await ui.find({ key: 'next' })).toBeUndefined()
+  await ui.press({ key: 'prev' })
+  expect(await period()).toContain('05/10 a 11/10')
+  expect((await sheetRow(ui, 'sheet-total')).at(-1)).toBe('2h00')
+  await ui.press({ key: 'next' })
+  expect(await period()).toContain('12/10 a 18/10')
+  // Another filter starts again from the current period.
+  await ui.press({ key: 'prev' })
+  await ui.press({ key: 'filter:month' })
+  expect(await period()).toContain('01/10 a 31/10')
+})
+
+test('terminal: the month shows its weeks, and every day its months', { options: { language: 'pt' } }, async ($, on) => {
+  world(on, at(9, 0), sheetDays())
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+  await ui.press({ key: 'filter:month' })
+  expect(await sheetRow(ui, 'sheet-head')).toEqual(['01', '05', '12', '19', '26', 'Total'])
+  expect(await sheetRow(ui, `sheet:${W}/room/app-a`)).toEqual(['app-a', '·', '2h00', '1h00', '·', '·', '3h00'])
+  await ui.press({ key: 'filter:all' })
+  expect(await sheetRow(ui, 'sheet-head')).toEqual(['10/26', 'Total'])
+})
+
+test('desktop: the sheet is one drawing with a tinted cell per day worked', { options: { language: 'pt' } }, async ($, on) => {
+  world(on, at(9, 0), sheetDays())
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'desktop', component: 'Pane', requestId: PANE, props: { bodyColumns: 60 } as never })
+  const [sheet] = (await ui.findAll({ type: 'Svg' })) as unknown as { props: { source: string; alt: string } }[]
+  expect(sheet?.props.source.match(/<rect/g)?.length).toBe(3)
+  expect(sheet?.props.source).toContain('1h15')
+  expect(sheet?.props.alt).toContain('site: 1h 15min')
+})
+
+test('terminal: a project in the disk root reads its name, not a blank', { options: { language: 'pt' } }, async ($, on) => {
+  world(on, at(9, 0), { 'day:2026-10-12': { 'C:/': 30 * MIN, [`${W}/room/app-a`]: 60 * MIN } })
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+  expect((await sheetRow(ui, 'sheet:C:/'))[0]).toBe('C:\\')
+  await ui.press({ key: 'corrections-toggle' })
+  expect(await entries(ui)).toEqual(['Users\\dougl\\workstation\\room\\app-a 1h 00min', 'C: 0h 30min'])
+})
+
+test('terminal: a corrected cell is marked, and corrections open from a button', { options: { language: 'en' } }, async ($, on) => {
+  world(on, at(9, 0), sheetDays())
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+  await ui.press({ key: 'corrections-toggle' })
+  await ui.press({ key: `fix:2026-10-13|${W}/room/app-a` })
+  await ui.input({ key: 'adjust', text: '+5', kind: 'submit' })
+  expect((await ui.find({ key: `sheet:${W}/room/app-a` }))?.text).toContain('45min*')
+  await ui.press({ key: 'corrections-toggle' })
+  expect(await days(ui)).toEqual([])
 })

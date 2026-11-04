@@ -75,7 +75,7 @@ export const folderName = (path: string) => path.split('/').filter(Boolean).at(-
 
 /** How a row inside `folder` names `project`: its path relative to the folder, or the folder's name. */
 export const relativeName = (project: string, folder: string) =>
-  project === folder ? folderName(folder) : project.slice(withSlash(folder).length)
+  (project === folder ? '' : project.slice(withSlash(folder).length)) || folderName(project)
 
 /** One project's time on one day, inside a folder; `corrected` marks a correction. */
 export type Entry = { project: string; ms: number; corrected: boolean }

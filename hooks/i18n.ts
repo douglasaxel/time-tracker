@@ -18,10 +18,12 @@ export const strings = {
     // Days and filters.
     noTime: 'No time worked in this period.',
     pickHint: 'Press a folder to see its days.',
-    viewDays: 'By day',
-    viewTree: 'By folder',
+    viewDays: 'Timesheet',
+    viewTree: 'Folders',
     allFolders: 'All folders',
-    olderDays: 'more days not shown. Pick a shorter period or a folder.',
+    correct: 'Correct hours',
+    before: 'before',
+    to: 'to',
     // Manual pause.
     pause: '⏸ Pause',
     resume: '▶ Resume',
@@ -38,7 +40,6 @@ export const strings = {
     colDate: 'Date',
     colProject: 'Project',
     colHours: 'Hours',
-    to: 'to',
   },
   pt: {
     today: 'hoje',
@@ -50,10 +51,12 @@ export const strings = {
     empty: 'Nenhum tempo trabalhado ainda. O tempo conta enquanto você trabalha com o Claude num projeto.',
     noTime: 'Nenhum tempo trabalhado neste período.',
     pickHint: 'Pressione uma pasta para ver os dias dela.',
-    viewDays: 'Por dia',
-    viewTree: 'Por pasta',
+    viewDays: 'Folha de ponto',
+    viewTree: 'Pastas',
     allFolders: 'Todas as pastas',
-    olderDays: 'dias a mais não aparecem. Escolha um período menor ou uma pasta.',
+    correct: 'Corrigir horas',
+    before: 'antes',
+    to: 'a',
     pause: '⏸ Pausar',
     resume: '▶ Retomar',
     paused: 'Em pausa: esta sessão não está contando tempo.',
@@ -67,7 +70,6 @@ export const strings = {
     colDate: 'Data',
     colProject: 'Projeto',
     colHours: 'Horas',
-    to: 'a',
   },
 } satisfies Record<Lang, Record<string, string>>
 
@@ -78,6 +80,9 @@ export const filters: Record<Lang, Record<Filter, string>> = {
 
 const weekdays = { en: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], pt: ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'] }
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** A day key's weekday: 0 is Sunday, 1 is Monday. */
+export const weekday = (day: string) => new Date(`${day}T00:00`).getDay()
 
 /** A day key as a row reads it: `seg 12/10` or `Mon Oct 12`; with the year, `seg 12/10/2026` or `Mon Oct 12, 2026`. */
 export function dayLabel(day: string, lang: Lang, withYear = false): string {

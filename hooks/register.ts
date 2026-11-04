@@ -25,6 +25,8 @@ const correctionsAtom = atom({ plugin: 'time-tracker', key: 'corrections' } as c
 const collapsedAtom = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
 const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'week')
 const viewAtom = atom({ plugin: 'time-tracker', key: 'view' } as const, 'days')
+const offsetAtom = atom({ plugin: 'time-tracker', key: 'offset' } as const, 0)
+const correctionsOpenAtom = atom({ plugin: 'time-tracker', key: 'correctionsOpen' } as const, false)
 const selectedAtom = atom({ plugin: 'time-tracker', key: 'selected' } as const, null)
 const correctingAtom = atom({ plugin: 'time-tracker', key: 'correcting' } as const, null)
 const copyAtom = atom({ plugin: 'time-tracker', key: 'copy' } as const, null)
@@ -271,7 +273,8 @@ export const register: Register = (on, options) => {
     const m = await read($, measurementAtom)
     const filter = await read($, filterAtom)
     const corrections = await read($, correctionsAtom)
-    const range = period(filter, await $.clock.now())
+    const offset = await read($, offsetAtom)
+    const range = period(filter, await $.clock.now(), offset)
     const days = inPeriod(applyCorrections(measuredDays(m), corrections), range)
     const selected = await read($, selectedAtom)
     const totals = projectTotals(days)
@@ -294,7 +297,12 @@ export const register: Register = (on, options) => {
       selected,
       folder,
       days: shown,
-      onFilter: f => Promise.all([update($, filterAtom, () => f), clearCopy()]),
+      onFilter: f => Promise.all([update($, filterAtom, () => f), update($, offsetAtom, () => 0), clearCopy()]),
+      range,
+      offset,
+      onOffset: n => Promise.all([update($, offsetAtom, () => Math.min(0, n)), clearCopy()]),
+      correctionsOpen: await read($, correctionsOpenAtom),
+      onCorrectionsOpen: () => update($, correctionsOpenAtom, o => !o),
       onSelect: path =>
         Promise.all([update($, selectedAtom, () => path), update($, viewAtom, () => 'days'), clearCopy()]),
       onClearSelection: () => Promise.all([update($, selectedAtom, () => null), clearCopy()]),

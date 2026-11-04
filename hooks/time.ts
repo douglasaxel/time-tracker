@@ -11,14 +11,17 @@ export function dayKey(ms: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-/** The first and last local day of the period holding `now`. The week runs Monday to Sunday. */
-export function period(filter: Filter, now: number): [string, string] {
+/**
+ * The first and last local day of the period holding `now`, or `offset` periods from it
+ * (-1 is the one before). The week runs Monday to Sunday.
+ */
+export function period(filter: Filter, now: number, offset = 0): [string, string] {
   const d = new Date(now)
-  const day = (offset: number, month = d.getMonth()) => dayKey(new Date(d.getFullYear(), month, offset).getTime())
-  if (filter === 'today') return [dayKey(now), dayKey(now)]
-  if (filter === 'month') return [day(1), day(0, d.getMonth() + 1)]
+  const day = (date: number, month = d.getMonth()) => dayKey(new Date(d.getFullYear(), month, date).getTime())
+  if (filter === 'today') return [day(d.getDate() + offset), day(d.getDate() + offset)]
+  if (filter === 'month') return [day(1, d.getMonth() + offset), day(0, d.getMonth() + offset + 1)]
   if (filter === 'week') {
-    const monday = d.getDate() - ((d.getDay() + 6) % 7)
+    const monday = d.getDate() - ((d.getDay() + 6) % 7) + 7 * offset
     return [day(monday), day(monday + 6)]
   }
   return ['', '9999-12-31']

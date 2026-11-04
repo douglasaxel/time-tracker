@@ -41,6 +41,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const w = world(on, at(9, 0))
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await ui.press({ key: 'view:tree' }) // the total reads there
     await turnStart($, 't1')
     await w.clock.advance(10 * MIN)
     expect(w.status()).toBe('⏱ 0h 10min hoje · app-a')
@@ -73,6 +74,7 @@ test('the control reads Pausar while counting and Retomar while paused', { optio
   world(on, at(9, 0))
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await ui.press({ key: 'view:tree' }) // the total reads there
   expect((await ui.find({ key: 'pause' }))?.text).toMatch(/Pausar/)
   await ui.press({ key: 'pause' })
   expect((await ui.find({ key: 'pause' }))?.text).toMatch(/Retomar/)
@@ -82,6 +84,7 @@ test('other sessions keep counting while this one is paused', { options: { langu
   const w = world(on, at(9, 0))
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await ui.press({ key: 'view:tree' }) // the total reads there
   await turnStart($, 't1')
   await w.clock.advance(5 * MIN)
   await ui.press({ key: 'pause' })
