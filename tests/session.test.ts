@@ -9,19 +9,17 @@ const MIN = 60_000
 function world(on: On, start: number, store: Record<string, unknown> = {}, isEnvMocked = true) {
   const clock = mock.clock(on, { now: start })
   const statuses: (string | undefined)[] = []
-  const session = { id: 'sess-1', root: 'C:/work/room/app-a' }
+  const session: { id: string; root: string; cwd?: string; repos: Record<string, string> } = { id: 'sess-1', root: 'C:/work/room/app-a', repos: {} }
   on('store.get', (_, e) => ({ value: store[e.key] }))
   on('store.set', (_, e) => { store[e.key] = JSON.parse(JSON.stringify(e.value)); return { value: undefined } })
   on('store.delete', (_, e) => { delete store[e.key]; return { value: undefined } })
   on('store.keys', () => ({ value: Object.keys(store) }))
   on('ui.status', (_, e) => { statuses.push(e.text); return { value: undefined } })
-  const files: Record<string, string> = {}
+  const cwd = () => session.cwd ?? session.root
+  const repoRoot = () => session.repos[cwd()]
   on('session.root', () => ({ value: session.root }))
-  on('fs.read', (_, e) => {
-    const text = files[e.path.replace(/\\/g, '/')]
-    if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
-    return { value: text }
-  })
+  on('session.cwd', () => ({ value: cwd() }))
+  on('session.repo', () => ({ value: repoRoot() ? { root: repoRoot() as string, remote: null, internal: false, name: null } : null }))
   on('session.id', () => ({ value: session.id }))
   on('settings.read', () => ({ value: {} }))
   if (isEnvMocked) on('env.get', () => ({ value: undefined }))
@@ -37,7 +35,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}, isEnv
   /** The session's subagents, as `$.agent.list()` answers. */
   const agents: { id: string; description: string; type: string; status: 'running' | 'completed' }[] = []
   on('agent.list', () => ({ value: agents }))
-  return { clock, statuses, session, store, files, agents, status: () => statuses.at(-1) }
+  return { clock, statuses, session, store, agents, status: () => statuses.at(-1) }
 }
 
 const startSession = ($: TestEngine) => $.session.start({ cwd: 'C:/work/room/app-a', surface: 'terminal', isInteractive: true })
@@ -181,12 +179,44 @@ test('a /cd while Claude answers moves the time on the next minute', { options: 
 test('a session in a worktree records its time in the original repository', { options: { language: 'pt' } }, async ($, on) => {
   const w = world(on, at(9, 0))
   w.session.root = 'C:\\work\\room\\app-a\\.claude\\worktrees\\wt'
-  w.files['C:/work/room/app-a/.claude/worktrees/wt/.git'] = 'gitdir: C:/work/room/app-a/.git/worktrees/wt\n'
+  w.session.repos[w.session.root] = 'C:\\work\\room\\app-a'
   await startSession($)
   await interact($, w, 't1', 5)
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 'sess-1', resume: { id: 'sess-1' } })
   expect(w.status()).toBe('⏱ 0h 05min hoje · app-a')
   expect(w.store['session:sess-1']).toEqual({ days: { '2026-10-18': { 'C:/work/room/app-a': [[at(9, 0), at(9, 5)]] } } })
+})
+
+/** The projects the session's key holds for 2026-10-18. */
+const projectsToday = (store: Record<string, unknown>) =>
+  Object.keys((store['session:sess-1'] as { days: Record<string, Record<string, unknown>> }).days['2026-10-18'] ?? {}).sort()
+
+test('a session opened in the home folder counts for the repository it works in, and for the home folder outside one', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  w.session.root = 'C:/Users/me'
+  w.session.repos['C:/Users/me/work/tracker'] = 'C:/Users/me/work/tracker'
+  await startSession($)
+  await interact($, w, 't1', 5)
+  w.session.cwd = 'C:/Users/me/work/tracker'
+  await interact($, w, 't2', 10)
+  w.session.cwd = 'C:/Users/me/.claude/plugins/cache'
+  await interact($, w, 't3', 5)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 'sess-1', resume: { id: 'sess-1' } })
+  expect(projectsToday(w.store)).toEqual(['C:/Users/me', 'C:/Users/me/work/tracker'])
+})
+
+test('a session in a folder that holds repositories splits its time between them', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  w.session.root = 'C:/work/quest'
+  w.session.repos['C:/work/quest/api'] = 'C:/work/quest/api'
+  w.session.repos['C:/work/quest/front'] = 'C:/work/quest/front'
+  await startSession($)
+  w.session.cwd = 'C:/work/quest/api'
+  await interact($, w, 't1', 5)
+  w.session.cwd = 'C:/work/quest/front'
+  await interact($, w, 't2', 5)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 'sess-1', resume: { id: 'sess-1' } })
+  expect(projectsToday(w.store)).toEqual(['C:/work/quest/api', 'C:/work/quest/front'])
 })
 
 const day = (ms: number) => {
@@ -290,15 +320,6 @@ test('background work nobody confirms stops counting after the inactivity limit'
   expect(w.status()).toBe('⏱ 0h 11min hoje · app-a')
 })
 
-test('a worktree whose gitdir is relative records its time in the original repository', { options: { language: 'pt' } }, async ($, on) => {
-  const w = world(on, at(9, 0))
-  w.session.root = 'C:/work/room/app-a/.claude/worktrees/wt'
-  w.files['C:/work/room/app-a/.claude/worktrees/wt/.git'] = 'gitdir: ../../../.git/worktrees/wt\n'
-  await startSession($)
-  await interact($, w, 't1', 5)
-  expect(w.status()).toBe('⏱ 0h 05min hoje · app-a')
-})
-
 for (const [name, minutes, shown] of [['added', 10, '0h 15min'], ['subtracted below zero', -30, '0h 00min']] as const) {
   test(`the status line counts today's corrections: ${name}`, { options: { language: 'pt' } }, async ($, on) => {
     const w = world(on, at(9, 0), { 'fix:2026-10-18': { 'C:/work/room/app-a': minutes * MIN } })
@@ -307,3 +328,102 @@ for (const [name, minutes, shown] of [['added', 10, '0h 15min'], ['subtracted be
     expect(w.status()).toBe(`⏱ ${shown} hoje · app-a`)
   })
 }
+
+// ---- time with subagents ----
+const startAgent = async ($: TestEngine, agentId: string) => {
+  await $.turn.start({ text: 'go', turnId: `t-${agentId}`, agentId })
+}
+const endAgent = async ($: TestEngine, agentId: string) => {
+  await $.turn.complete({ answer: 'ok', durationMs: 0, isAborted: false, turnId: `t-${agentId}`, reason: 'answer', agentId })
+}
+
+/** The time per project on 2026-10-18, as the panel's totals read it. */
+async function totals($: TestEngine) {
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: 'time-tracker', props: { bodyColumns: 80 } as never })
+  return { real: (await ui.find({ key: 'measure:real' }))?.text.trim(), effort: (await ui.find({ key: 'measure:effort' }))?.text.trim(), ui }
+}
+
+test('three subagents in a 5-hour implementation: 5h of real time and 8h30 with subagents', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  await startSession($)
+  await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'go', turnId: 'main-1' })
+  await startAgent($, 'a1') // 9:00 to 12:00
+  await startAgent($, 'a2') // 9:00 to 11:30
+  await w.clock.advance(120 * MIN)
+  await startAgent($, 'a3') // 11:00 to 14:00
+  await w.clock.advance(30 * MIN)
+  await endAgent($, 'a2')
+  await w.clock.advance(30 * MIN)
+  await endAgent($, 'a1')
+  await w.clock.advance(120 * MIN)
+  await endAgent($, 'a3')
+  await $.turn.complete({ answer: 'ok', durationMs: 0, isAborted: false, turnId: 'main-1', reason: 'answer' })
+  const { real, effort, ui } = await totals($)
+  expect(real).toBe('Tempo real 5h 00min')
+  expect(effort).toBe('Com subagentes 8h 30min')
+  // The button changes what the cells show.
+  await ui.press({ key: 'measure:effort' })
+  expect((await ui.find({ key: 'sheet-total' }))?.text.trim().split(/\s+/).at(-1)).toBe('8h30')
+  await ui.press({ key: 'measure:real' })
+  expect((await ui.find({ key: 'sheet-total' }))?.text.trim().split(/\s+/).at(-1)).toBe('5h00')
+})
+
+test('the main session working alone counts in both times; with no subagent they match', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  await startSession($)
+  const { ui } = await totals($)
+  await interact($, w, 't1', 60)
+  expect((await ui.find({ key: 'measure:effort' }))?.text.trim()).toBe('Com subagentes 1h 00min')
+  await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: 'go', turnId: 't2' })
+  await startAgent($, 'a1')
+  await startAgent($, 'a2')
+  await w.clock.advance(30 * MIN)
+  await endAgent($, 'a1')
+  await endAgent($, 'a2')
+  await $.turn.complete({ answer: 'ok', durationMs: 0, isAborted: false, turnId: 't2', reason: 'answer' })
+  expect((await ui.find({ key: 'measure:real' }))?.text.trim()).toBe('Tempo real 1h 30min')
+  expect((await ui.find({ key: 'measure:effort' }))?.text.trim()).toBe('Com subagentes 2h 00min') // 1h alone + 30min + 30min
+})
+
+test('a subagent keeps counting through the minute ticks and is stored', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  await startSession($)
+  await $.turn.start({ text: 'go', turnId: 'main-1' })
+  await startAgent($, 'a1')
+  await w.clock.advance(10 * MIN)
+  const stored = w.store['session:sess-1'] as { agents: Record<string, Record<string, Record<string, [number, number][]>>> }
+  expect(stored.agents.a1?.['2026-10-18']?.['C:/work/room/app-a']).toEqual([[at(9, 0), at(9, 10)]])
+})
+
+test('a manual pause stops the subagents counting too', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  await startSession($)
+  await $.turn.start({ text: 'go', turnId: 'main-1' })
+  await startAgent($, 'a1')
+  await w.clock.advance(10 * MIN)
+  const { ui } = await totals($)
+  await ui.press({ key: 'pause' })
+  await w.clock.advance(30 * MIN)
+  expect((await ui.find({ key: 'measure:real' }))?.text.trim()).toBe('Tempo real 0h 10min')
+  expect((await ui.find({ key: 'measure:effort' }))?.text.trim()).toBe('Com subagentes 0h 10min')
+})
+
+test('a closed day keeps its time with subagents, and older days fall back to the time worked', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0), {
+    'day:2026-10-13': { 'C:/work/room/app-a': 60 * MIN }, // measured before subagents were counted
+    'session:sess-0': {
+      days: { '2026-10-14': { 'C:/work/room/app-a': [[at(9, 0, 14), at(10, 0, 14)]] } },
+      agents: { a1: { '2026-10-14': { 'C:/work/room/app-a': [[at(9, 0, 14), at(10, 0, 14)]] } }, a2: { '2026-10-14': { 'C:/work/room/app-a': [[at(9, 0, 14), at(10, 0, 14)]] } } },
+    },
+  })
+  await startSession($)
+  await w.clock.advance(1 * MIN)
+  expect(w.store['session:sess-0']).toBeUndefined()
+  expect(w.store['day:2026-10-14']).toEqual({ 'C:/work/room/app-a': 60 * MIN })
+  expect(w.store['effort:2026-10-14']).toEqual({ 'C:/work/room/app-a': 120 * MIN })
+  const { real, effort } = await totals($)
+  expect(real).toBe('Tempo real 2h 00min')
+  expect(effort).toBe('Com subagentes 3h 00min') // 1h + 2h
+})

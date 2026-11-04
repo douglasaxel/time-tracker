@@ -1,9 +1,8 @@
 // The tree: folders from the disk root down to each project with time, single-child
 // folders without time of their own folded into one node. Paths and their names. Pure.
-import type { Corrections, DayTotals, Days } from '../types'
+import type { AgentDays, Corrections, DayTotals, Days } from '../types'
 import { isCorrected } from './corrections'
-import { merge } from './ledger'
-import { total } from './time'
+import { effortTime, total } from './time'
 
 export type Node = {
   /** The folder's path, `/`-separated: the key that selects and collapses it. */
@@ -16,15 +15,33 @@ export type Node = {
 }
 
 /**
- * Time worked per day and project: this session's and the other sessions' intervals united
- * (overlaps count once), and a closed day's stored total where it is the larger.
+ * Time worked per day and project: the sessions' united intervals (overlaps count once), and a
+ * closed day's stored total where it is the larger.
  */
-export function dayTotals(own: Days, others: Days, closed: Readonly<Record<string, DayTotals>>): Record<string, DayTotals> {
+export function dayTotals(open: Days, closed: Readonly<Record<string, DayTotals>>): Record<string, DayTotals> {
   const out: Record<string, DayTotals> = {}
   for (const [day, projects] of Object.entries(closed)) out[day] = { ...projects }
-  for (const [day, projects] of Object.entries(merge([{ days: own }, { days: others }]))) {
+  for (const [day, projects] of Object.entries(open)) {
     const d = (out[day] ??= {})
     for (const [p, intervals] of Object.entries(projects)) d[p] = Math.max(d[p] ?? 0, total(intervals))
+  }
+  return out
+}
+
+/**
+ * The time with each subagent counted, per day and project: never below the time worked, which is
+ * also what a day measured before subagents were counted shows.
+ */
+export function dayEfforts(
+  worked: Readonly<Record<string, DayTotals>>,
+  open: Days,
+  agents: AgentDays,
+  closed: Readonly<Record<string, DayTotals>>,
+): Record<string, DayTotals> {
+  const out: Record<string, DayTotals> = {}
+  for (const [day, projects] of Object.entries(worked)) {
+    const d: DayTotals = (out[day] = {})
+    for (const [p, ms] of Object.entries(projects)) d[p] = Math.max(ms, closed[day]?.[p] ?? 0, effortTime(open[day]?.[p] ?? [], agents[day]?.[p] ?? []))
   }
   return out
 }
@@ -44,18 +61,6 @@ export const inPeriod = (days: Readonly<Record<string, DayTotals>>, [from, to]: 
 export function toSlashes(path: string): string {
   const s = path.trim().split('\\').join('/')
   return s.length > 3 ? s.replace(/\/+$/, '') : s
-}
-
-/** `path` resolved against the folder `base` when it is relative, `.` and `..` worked out; both `/`-separated. */
-export function resolvePath(base: string, path: string): string {
-  const joined = /^([a-z]:)?\//i.test(path) ? path : `${base}/${path}`
-  const out: string[] = []
-  for (const part of joined.split('/')) {
-    if (part === '..') {
-      if (out.length > 1) out.pop()
-    } else if (part !== '.' && (part || !out.length)) out.push(part)
-  }
-  return out.join('/')
 }
 
 /** How the panel shows `text`, a part of `path`: with backslashes when `path` is a Windows path. */
@@ -78,23 +83,34 @@ export const relativeName = (project: string, folder: string) =>
   (project === folder ? '' : project.slice(withSlash(folder).length)) || folderName(project)
 
 /** One project's time on one day, inside a folder; `corrected` marks a correction. */
-export type Entry = { project: string; ms: number; corrected: boolean }
-export type FolderDay = { day: string; total: number; corrected: boolean; entries: Entry[] }
+export type Entry = { project: string; ms: number; effort: number; corrected: boolean }
+export type FolderDay = { day: string; total: number; effort: number; corrected: boolean; entries: Entry[] }
 
 /**
  * Each day in `folder` and every folder inside it, oldest first, with each project's time on it
  * (corrections applied). Days and projects without time are left out unless corrected.
  */
-export function folderDays(days: Readonly<Record<string, DayTotals>>, folder: string, corrections: Readonly<Corrections> = {}): FolderDay[] {
+export function folderDays(
+  days: Readonly<Record<string, DayTotals>>,
+  folder: string,
+  corrections: Readonly<Corrections> = {},
+  efforts: Readonly<Record<string, DayTotals>> = {},
+): FolderDay[] {
   const inside = withSlash(folder)
   return Object.entries(days)
     .map(([day, projects]): FolderDay => {
       const entries = Object.entries(projects)
         .filter(([p]) => p === folder || p.startsWith(inside))
-        .map(([project, ms]) => ({ project, ms, corrected: isCorrected(corrections, { day, project }) }))
+        .map(([project, ms]) => ({ project, ms, effort: efforts[day]?.[project] ?? ms, corrected: isCorrected(corrections, { day, project }) }))
         .filter(e => e.ms > 0 || e.corrected)
         .sort((a, b) => a.project.localeCompare(b.project))
-      return { day, total: entries.reduce((n, e) => n + e.ms, 0), corrected: entries.some(e => e.corrected), entries }
+      return {
+        day,
+        total: entries.reduce((n, e) => n + e.ms, 0),
+        effort: entries.reduce((n, e) => n + e.effort, 0),
+        corrected: entries.some(e => e.corrected),
+        entries,
+      }
     })
     .filter(d => d.entries.length)
     .sort((a, b) => (a.day < b.day ? -1 : 1))

@@ -4,8 +4,14 @@ export type Interval = [number, number]
 /** Day key `YYYY-MM-DD` (local) -> project path -> intervals, sorted and disjoint. */
 export type Days = Record<string, Record<string, Interval[]>>
 
+/** Each subagent's own intervals, by its id. */
+export type AgentRuns = Record<string, Days>
+
+/** Day -> project -> the intervals of each subagent that worked there. */
+export type AgentDays = Record<string, Record<string, Interval[][]>>
+
 /** What a session writes to `$.store` under `session:<sessionId>`. */
-export type SessionRecord = { days: Days }
+export type SessionRecord = { days: Days; agents?: AgentRuns }
 
 /** What `$.store` holds under `day:<YYYY-MM-DD>` for a closed day: project path -> ms worked, all sessions united. */
 export type DayTotals = Record<string, number>
@@ -34,6 +40,10 @@ export type SessionMeasurement = {
   live: Live | null
   /** Turns running now (main loop and subagents): while any runs, the session is active. */
   turns: string[]
+  /** Closed intervals of each subagent of this session. */
+  agents: AgentRuns
+  /** The subagents running now. */
+  liveAgents: Record<string, Live>
 }
 
 /** The /horas panel's period: today, this week (Monday to Sunday), this month, every day, or the days picked on the calendar. */
@@ -41,6 +51,9 @@ export type Filter = 'today' | 'week' | 'month' | 'all' | 'custom'
 
 /** The open period picker: the month it shows and the day the person started the period on. */
 export type PeriodPicker = { month: string; start: string | null }
+
+/** Which time the /horas panel's cells show: the time worked, or that time with each subagent counted. */
+export type Measure = 'real' | 'effort'
 
 /** What the /horas panel shows: the timesheet of projects by day, or the tree of folders. */
 export type View = 'days' | 'tree'
@@ -56,6 +69,7 @@ declare module 'claude-code' {
       /** The /horas panel's period. */
       filter: Filter
       view: View
+      measure: Measure
       /** Periods before the current one the panel shows: -1 is last week, on the week filter. */
       offset: number
       correctionsOpen: boolean

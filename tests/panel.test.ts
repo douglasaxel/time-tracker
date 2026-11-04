@@ -29,6 +29,8 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   })
   on('command.register', () => ({ value: { command: 'horas' } }))
   on('session.root', () => ({ value: `${W}/room/app-a` }))
+  on('session.cwd', () => ({ value: `${W}/room/app-a` }))
+  on('session.repo', () => ({ value: null }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('settings.read', () => ({ value: {} }))
   on('env.get', () => ({ value: undefined }))
@@ -348,12 +350,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
       [
         '## room · Semana, 12/10/2026 a 18/10/2026',
         '',
-        '| Data | Projeto | Horas |',
-        '| --- | --- | ---: |',
-        '| seg 12/10/2026 | app-a | 2h 59min |',
-        '| seg 12/10/2026 | app-b | 3h 00min |',
-        '| ter 13/10/2026 | app-a | 0h 10min * |',
-        '| **Total** | | **6h 10min** |',
+        '| Data | Projeto | Horas | Com subagentes |',
+        '| --- | --- | ---: | ---: |',
+        '| seg 12/10/2026 | app-a | 2h 59min | 2h 59min |',
+        '| seg 12/10/2026 | app-b | 3h 00min | 3h 00min |',
+        '| ter 13/10/2026 | app-a | 0h 10min * | 0h 10min |',
+        '| **Total** | | **6h 10min** | **6h 10min** |',
         '',
         '\\* corrigido à mão',
         '',
@@ -373,15 +375,15 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const table = [
       '## app-b · All, 2026-10-12',
       '',
-      '| Date | Project | Hours |',
-      '| --- | --- | ---: |',
-      '| Mon Oct 12, 2026 | app-b | 3h 00min |',
-      '| **Total** | | **3h 00min** |',
+      '| Date | Project | Hours | With subagents |',
+      '| --- | --- | ---: | ---: |',
+      '| Mon Oct 12, 2026 | app-b | 3h 00min | 3h 00min |',
+      '| **Total** | | **3h 00min** | **3h 00min** |',
       '',
     ].join('\n')
     expect(w.copied).toEqual([table])
     expect((await ui.find({ type: 'Text', text: /clipboard did not take/ }))?.text).toBeDefined()
-    expect((await ui.find({ key: 'copied-table' }))?.text).toContain('| Mon Oct 12, 2026 | app-b | 3h 00min |')
+    expect((await ui.find({ key: 'copied-table' }))?.text).toContain('| Mon Oct 12, 2026 | app-b | 3h 00min | 3h 00min |')
   })
 }
 

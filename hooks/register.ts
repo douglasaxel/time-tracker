@@ -3,18 +3,18 @@
 // every hook passes `next(e)` on unchanged.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface, Timer } from 'claude-code'
-import type { Correction, Corrections, DayTotals, Days, SessionMeasurement, SessionRecord } from '../types'
+import type { Correction, Corrections, DayTotals, SessionMeasurement, SessionRecord } from '../types'
 import { monthOf, monthRange, shiftMonth } from './calendar'
 import { applyCorrections, isSameTarget, nextCorrection, parseMinutes } from './corrections'
 import { isPortuguese, strings, type Lang } from './i18n'
-import { correctionsKey, dayOfKey, isClosedDayKey, isCorrectionsKey, isLedgerKey, ledger, sessionKey } from './ledger'
+import { correctionsKey, dayOfKey, isClosedDayKey, isCorrectionsKey, isEffortKey, isLedgerKey, ledger, merge, mergeAgents, sessionKey } from './ledger'
 import { markdownTable } from './markdown'
 import { panel } from './panel'
 import { statusText } from './status'
-import { MIN, dayKey, expire, liveDays, period, startManualPause, touch, type Moment } from './time'
-import { buildTree, commonFolder, dayTotals, folderDays, inPeriod, projectTotals, resolvePath, toSlashes } from './tree'
+import { MIN, dayKey, expire, liveAgentDays, liveDays, period, startManualPause, syncAgents, touch, type Moment } from './time'
+import { buildTree, commonFolder, dayEfforts, dayTotals, folderDays, inPeriod, projectTotals, toSlashes } from './tree'
 
-const empty: SessionMeasurement = { id: null, days: {}, live: null, turns: [] }
+const empty: SessionMeasurement = { id: null, days: {}, live: null, turns: [], agents: {}, liveAgents: {} }
 const measurementAtom = atom({ plugin: 'time-tracker', key: 'measurement' } as const, empty)
 /** When the last classic.Stop listed background work of the session; null when it listed none. */
 const backgroundSinceAtom = atom({ plugin: 'time-tracker', key: 'backgroundSince' } as const, null)
@@ -26,6 +26,7 @@ const correctionsAtom = atom({ plugin: 'time-tracker', key: 'corrections' } as c
 const collapsedAtom = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
 const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'week')
 const viewAtom = atom({ plugin: 'time-tracker', key: 'view' } as const, 'days')
+const measureAtom = atom({ plugin: 'time-tracker', key: 'measure' } as const, 'real')
 const offsetAtom = atom({ plugin: 'time-tracker', key: 'offset' } as const, 0)
 const correctionsOpenAtom = atom({ plugin: 'time-tracker', key: 'correctionsOpen' } as const, false)
 const pickerAtom = atom({ plugin: 'time-tracker', key: 'picker' } as const, null)
@@ -41,15 +42,29 @@ let inactivityMs = 10 * MIN
 let lang: Lang = 'en'
 let lastSaved = ''
 let timer: Timer | undefined
-/** The other sessions' days, read from the store when a session id binds and each minute. */
-let others: Days = {}
+/** The other sessions' records, read from the store when a session id binds and each minute. */
+let others: readonly unknown[] = []
 /** The closed days' totals, as `sync` last saw them. */
 let closed: Record<string, DayTotals> = {}
+/** The closed days' time with subagents counted, as `sync` last saw it. */
+let closedEfforts: Record<string, DayTotals> = {}
 
 const quiet = (p: Promise<unknown>) => p.catch(() => undefined)
 
+/** What a session's key holds; a session that ran no subagent writes only its days. */
+function sessionRecord(m: SessionMeasurement): SessionRecord {
+  const agents = liveAgentDays(m)
+  return { days: liveDays(m), ...(Object.keys(agents).length ? { agents } : {}) }
+}
+
 /** Time worked per day and project, every session counted once, before corrections. */
-const measuredDays = (m: SessionMeasurement) => dayTotals(liveDays(m), others, closed)
+const measuredDays = (m: SessionMeasurement) => dayTotals(merge([sessionRecord(m), ...others]), closed)
+
+/** The time with each subagent counted, per day and project, before corrections. */
+function measuredEfforts(m: SessionMeasurement) {
+  const sessions = [sessionRecord(m), ...others]
+  return dayEfforts(measuredDays(m), merge(sessions), mergeAgents(sessions), closedEfforts)
+}
 
 async function detectLang($: EngineInterface, option: unknown): Promise<Lang> {
   if (option === 'en' || option === 'pt') return option
@@ -66,20 +81,18 @@ async function detectLang($: EngineInterface, option: unknown): Promise<Lang> {
 const projectOf = new Map<string, string>()
 
 /**
- * The project: the session's project root, re-read at every activity edge and minute (a /cd
- * moves it, with no event), or the original repository when that root is a worktree, as its
- * `.git` file's `gitdir: <original>/.git/worktrees/<name>` says (relative to the worktree, or
- * absolute). `/` separators, no trailing one.
+ * The project: the git repository the session is working in now (its main working tree for a
+ * worktree), or the session's project root outside any repository. Re-read at every activity edge
+ * and minute: neither a shell `cd` nor a /cd raises an event. Kept per folder, as finding the
+ * repository reads the working copy.
  */
 async function project($: EngineInterface): Promise<string> {
-  const root = toSlashes(await $.session.root())
-  const known = projectOf.get(root)
+  const cwd = await $.session.cwd()
+  const known = projectOf.get(cwd)
   if (known) return known
-  const git = await $.fs.read(`${root}/.git`).catch(() => '')
-  const gitdir = typeof git === 'string' ? /^gitdir:\s*(.+?)\s*$/m.exec(git)?.[1] : undefined
-  const original = gitdir ? /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(resolvePath(root, toSlashes(gitdir)))?.[1] : undefined
-  const p = original ?? root
-  projectOf.set(root, p)
+  const repo = await $.session.repo().catch(() => null)
+  const p = toSlashes(repo?.root ?? (await $.session.root()))
+  projectOf.set(cwd, p)
   return p
 }
 
@@ -90,13 +103,13 @@ async function ensureSession($: EngineInterface) {
   if ((await read($, measurementAtom)).id) return
   const id = await $.session.id()
   const stored = (await $.store.get(sessionKey(id))) as SessionRecord | undefined
-  const m = await update($, measurementAtom, r => (r.id ? r : { ...empty, id, days: stored?.days ?? {} }))
+  const m = await update($, measurementAtom, r => (r.id ? r : { ...empty, id, days: stored?.days ?? {}, agents: stored?.agents ?? {} }))
   await quiet(sync($, m, await $.clock.now()))
 }
 
 async function persist($: EngineInterface, m: SessionMeasurement) {
   if (!m.id) return
-  const value: SessionRecord = { days: liveDays(m) }
+  const value = sessionRecord(m)
   const json = JSON.stringify(value)
   if (json === lastSaved) return
   await $.store.set(sessionKey(m.id), value)
@@ -118,7 +131,7 @@ async function activity($: EngineInterface, edge: { turnStart?: string; turnEnd?
   const m = await update($, measurementAtom, r => {
     const turns = r.turns.filter(t => t !== edge.turnEnd)
     if (edge.turnStart && !turns.includes(edge.turnStart)) turns.push(edge.turnStart)
-    return { ...(paused ? r : touch(r, at)), turns }
+    return paused ? { ...r, turns } : syncAgents({ ...touch(r, at), turns }, at.now, at.project)
   })
   await showStatus($, m, at.now)
 }
@@ -146,7 +159,7 @@ async function tick($: EngineInterface) {
   const paused = await read($, pausedAtom)
   const m = await update($, measurementAtom, r => {
     if (paused) return r
-    return busy ? touch(r, at) : expire(r, now, inactivityMs)
+    return busy ? syncAgents(touch(r, at), now, at.project) : expire(r, now, inactivityMs)
   })
   await persist($, m)
   await quiet(sync($, m, now))
@@ -158,15 +171,16 @@ async function sync($: EngineInterface, m: SessionMeasurement, now: number) {
   const entries: Record<string, unknown> = {}
   for (const k of await $.store.keys()) if (isLedgerKey(k)) entries[k] = await $.store.get(k)
   const own = m.id ? sessionKey(m.id) : ''
-  if (own) entries[own] = { days: liveDays(m) }
+  if (own) entries[own] = sessionRecord(m)
   const plan = ledger(entries, own, dayKey(now - inactivityMs - MIN))
   for (const [k, v] of plan.set) await $.store.set(k, v)
   for (const k of plan.remove) await $.store.delete(k)
   others = plan.others
-  const days = [...Object.entries(entries).filter(([k]) => isClosedDayKey(k)), ...plan.set]
-  closed = Object.fromEntries(days.map(([k, v]) => [dayOfKey(k), v as DayTotals]))
-  const corrections = Object.entries(entries).filter(([k]) => isCorrectionsKey(k))
-  await update($, correctionsAtom, () => Object.fromEntries(corrections.map(([k, v]) => [dayOfKey(k), v as Record<string, Correction>])))
+  const saved = Object.entries({ ...entries, ...Object.fromEntries(plan.set) })
+  const byDay = (isKey: (k: string) => boolean) => Object.fromEntries(saved.filter(([k]) => isKey(k)).map(([k, v]) => [dayOfKey(k), v]))
+  closed = byDay(isClosedDayKey) as Record<string, DayTotals>
+  closedEfforts = byDay(isEffortKey) as Record<string, DayTotals>
+  await update($, correctionsAtom, () => byDay(isCorrectionsKey) as Corrections)
 }
 
 /** Pause closes the activity in progress at this moment; Resume lets the next activity count. */
@@ -221,7 +235,7 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     await quiet((async () => {
       const m = await read($, measurementAtom)
-      await persist($, { ...m, live: null, days: liveDays(m) })
+      await persist($, syncAgents({ ...m, turns: [] }, await $.clock.now(), ''))
       await update($, measurementAtom, () => empty)
       lastSaved = ''
     })())
@@ -283,12 +297,14 @@ export const register: Register = (on, options) => {
     const range = filter === 'custom' && customRange ? customRange : period(filter, now, offset)
     const allDays = applyCorrections(measuredDays(m), corrections)
     const days = inPeriod(allDays, range)
+    const efforts = applyCorrections(measuredEfforts(m), corrections)
+    const measure = await read($, measureAtom)
     const picker = await read($, pickerAtom)
     const selected = await read($, selectedAtom)
-    const totals = projectTotals(days)
+    const totals = projectTotals(measure === 'effort' ? inPeriod(efforts, range) : days)
     // The selected folder, or the deepest one holding every project: what names the rows and the table.
     const folder = selected ?? commonFolder(Object.keys(totals))
-    const shown = folderDays(days, folder, corrections)
+    const shown = folderDays(days, folder, corrections, efforts)
     const clearCopy = () => update($, copyAtom, () => null)
     const openPicker = () => update($, pickerAtom, p => (p ? null : { month: monthOf(range[1] < today ? range[1] : today), start: null }))
     const applyRange = (r: [string, string]) =>
@@ -298,6 +314,8 @@ export const register: Register = (on, options) => {
       surface: e.surface,
       columns: e.props.bodyColumns || 40,
       view: await read($, viewAtom),
+      measure,
+      onMeasure: next => update($, measureAtom, () => next),
       onView: v => update($, viewAtom, () => v),
       collapsed: await read($, collapsedAtom),
       lang,

@@ -5,12 +5,16 @@ Mede o tempo trabalhado em cada projeto com o Claude Code, para cobrar horas de 
 ## Medição
 
 **Projeto**:
-A pasta onde uma sessão trabalha: o project root dela, ou o repositório original quando a sessão roda num worktree.
+O repositório git em que a sessão está trabalhando (o repositório original, num worktree), ou a pasta onde a sessão abriu, fora de um repositório.
 _Avoid_: repositório, workspace, pasta de trabalho
 
 **Tempo trabalhado**:
 O tempo em que uma sessão está ativa num projeto, contado uma vez só mesmo com várias sessões abertas no mesmo projeto.
 _Avoid_: tempo de sessão, horas abertas
+
+**Tempo com subagentes**:
+A soma do tempo de cada subagente com o tempo trabalhado em que nenhum subagente estava rodando. Sem subagentes, é igual ao tempo trabalhado.
+_Avoid_: esforço, tempo total
 
 **Atividade**:
 Um período em que o Claude responde, um trabalho em background da sessão roda, ou uma pausa curta liga duas interações.

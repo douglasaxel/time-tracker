@@ -1,7 +1,7 @@
 // Copy as Markdown: the selected folder's days in the period as a table for the hours report. Pure.
 import type { Filter } from '../types'
 import { dayLabel, filters, strings, type Lang } from './i18n'
-import { formatDuration, formatTotal } from './time'
+import { formatDuration, formatEffort, formatTotal } from './time'
 import { folderName, relativeName, type FolderDay } from './tree'
 
 /** A day key as the title writes it: `12/10/2026` or `2026-10-12`. */
@@ -17,15 +17,15 @@ export function markdownTable(folder: string, days: readonly FolderDay[], filter
   const [from, to] = filter === 'all' ? [days[0]?.day ?? '', days.at(-1)?.day ?? ''] : range
   const when = from === to ? date(from, lang) : `${date(from, lang)} ${s.to} ${date(to, lang)}`
   const rows = days.flatMap(d =>
-    d.entries.map(e => `| ${dayLabel(d.day, lang, true)} | ${relativeName(e.project, folder)} | ${formatDuration(e.ms)}${e.corrected ? ' *' : ''} |`),
+    d.entries.map(e => `| ${dayLabel(d.day, lang, true)} | ${relativeName(e.project, folder)} | ${formatDuration(e.ms)}${e.corrected ? ' *' : ''} | ${formatDuration(e.effort)} |`),
   )
   return [
     `## ${folderName(folder) || s.total} · ${filters[lang][filter]}, ${when}`,
     '',
-    `| ${s.colDate} | ${s.colProject} | ${s.colHours} |`,
-    '| --- | --- | ---: |',
+    `| ${s.colDate} | ${s.colProject} | ${s.colHours} | ${s.effortTime} |`,
+    '| --- | --- | ---: | ---: |',
     ...rows,
-    `| **${s.total}** | | **${formatTotal(days)}** |`,
+    `| **${s.total}** | | **${formatTotal(days)}** | **${formatEffort(days)}** |`,
     '',
     ...(days.some(d => d.corrected) ? [`\\${s.corrected}`, ''] : []),
   ].join('\n')

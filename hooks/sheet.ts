@@ -1,8 +1,8 @@
 // The timesheet: projects in the rows, the period's days (or weeks, or months) in the columns. Pure.
-import type { Filter } from '../types'
+import type { Filter, Measure } from '../types'
 import { dayLabel, strings, weekday, type Lang } from './i18n'
 import { MIN, dayKey } from './time'
-import { displayPath, folderName, type FolderDay } from './tree'
+import { displayPath, folderName, type Entry, type FolderDay } from './tree'
 
 type SheetColumn = { from: string; to: string; head: string; sub: string }
 type SheetRow = { project: string; name: string; cells: number[]; corrected: boolean[]; total: number }
@@ -86,10 +86,11 @@ function projectNames(projects: readonly string[]): Map<string, string> {
   )
 }
 
-/** The period's sheet: the projects with the most time first, a total per row and per column. */
-export function buildSheet(columns: SheetColumn[], days: readonly FolderDay[]): Sheet {
+/** The period's sheet in the chosen time: the projects with the most time first, a total per row and per column. */
+export function buildSheet(columns: SheetColumn[], days: readonly FolderDay[], measure: Measure): Sheet {
+  const timeOf = (e: Entry) => (measure === 'effort' ? e.effort : e.ms)
   const totalsByProject = new Map<string, number>()
-  for (const d of days) for (const e of d.entries) totalsByProject.set(e.project, (totalsByProject.get(e.project) ?? 0) + e.ms)
+  for (const d of days) for (const e of d.entries) totalsByProject.set(e.project, (totalsByProject.get(e.project) ?? 0) + timeOf(e))
   const projects = [...totalsByProject.keys()].sort((a, b) => (totalsByProject.get(b) ?? 0) - (totalsByProject.get(a) ?? 0) || a.localeCompare(b))
   const names = projectNames(projects)
   const rows = projects.map((project): SheetRow => {
@@ -99,7 +100,7 @@ export function buildSheet(columns: SheetColumn[], days: readonly FolderDay[]): 
       const i = columns.findIndex(c => d.day >= c.from && d.day <= c.to)
       const e = d.entries.find(x => x.project === project)
       if (i < 0 || !e) continue
-      cells[i] = (cells[i] ?? 0) + e.ms
+      cells[i] = (cells[i] ?? 0) + timeOf(e)
       corrected[i] = corrected[i] || e.corrected
     }
     return { project, name: names.get(project) ?? project, cells, corrected, total: totalsByProject.get(project) ?? 0 }

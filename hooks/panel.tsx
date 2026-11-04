@@ -3,12 +3,12 @@
 // the sheet to it. A drawing takes no press, so corrections open from a button under the sheet.
 // Pure: register.ts hands it the surface's elements, the data and what a press does.
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
-import type { CorrectionTarget, Filter, PeriodPicker, View } from '../types'
+import type { CorrectionTarget, Filter, Measure, PeriodPicker, View } from '../types'
 import { monthOf, monthWeeks } from './calendar'
 import { isSameTarget } from './corrections'
 import { dayLabel, filters, monthTitle, strings, weekHeads, type Lang } from './i18n'
 import { buildSheet, periodLabel, sheetColumns, sheetHeight, sheetLines, sheetSvg } from './sheet'
-import { formatDuration, formatTotal } from './time'
+import { formatDuration, formatEffort, formatTotal } from './time'
 import { displayPath, folderName, relativeName, type FolderDay, type Node } from './tree'
 
 export type PanelArgs = {
@@ -19,6 +19,9 @@ export type PanelArgs = {
   columns: number
   view: View
   onView: (view: View) => unknown
+  /** Which time the cells and the tree show; both totals always read at the top. */
+  measure: Measure
+  onMeasure: (measure: Measure) => unknown
   /** Paths of the folders the person collapsed; every other folder is open. */
   collapsed: readonly string[]
   lang: Lang
@@ -69,7 +72,7 @@ export type PanelArgs = {
 }
 
 export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderElement {
-  const { roots, surface, columns, view, onView, collapsed, lang, onToggle, paused, onPause, filter, onFilter } = args
+  const { roots, surface, columns, view, onView, measure, onMeasure, collapsed, lang, onToggle, paused, onPause, filter, onFilter } = args
   const { range, offset, onOffset, picker, today, workedDays, onOpenPicker, onPickerMonth, onPickDay, onPickMonth } = args
   const { selected, folder, days, onSelect, onClearSelection } = args
   const { correctionsOpen, onCorrectionsOpen, correcting, onCorrect, onAdjust, onDelete, copy, onCopy } = args
@@ -174,11 +177,29 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     </Box>
   ) : null
 
+  // The two totals of what is shown; pressing one makes it the time the cells show.
+  const times: [Measure, string, string][] = [
+    ['real', s.realTime, formatTotal(days)],
+    ['effort', s.effortTime, formatEffort(days)],
+  ]
+  const totals = (
+    <Box key="measures" flexDirection="row" gap={2} marginBottom={1}>
+      {times.map(([m, label, time]) => (
+        <Button key={`measure:${m}`} plain onPress={() => void onMeasure(m)}>
+          <Text bold={m === measure} inverse={m === measure} dimColor={m !== measure}>
+            {` ${label} ${time} `}
+          </Text>
+        </Button>
+      ))}
+    </Box>
+  )
+
   const top = (
     <Box key="top" flexDirection="column">
       {head}
       {paused ? <Text color="warning">{s.paused}</Text> : null}
       {controls}
+      {totals}
       {calendar}
     </Box>
   )
@@ -235,7 +256,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     )
   }
 
-  const sheet = buildSheet(sheetColumns(filter, range, days, lang), days)
+  const sheet = buildSheet(sheetColumns(filter, range, days, lang), days, measure)
   const width = Math.max(240, Math.min(900, columns * 8 - 8))
   const alt = sheet.rows.map(r => `${r.name}: ${formatDuration(r.total)}`).join(', ')
   const table =

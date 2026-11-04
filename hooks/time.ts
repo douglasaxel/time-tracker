@@ -1,5 +1,5 @@
 // The time model: pure functions over intervals, days and the session record. No `$` here.
-import type { Days, Filter, Interval, Live, SessionMeasurement } from '../types'
+import type { AgentRuns, Days, Filter, Interval, Live, SessionMeasurement } from '../types'
 
 export const MIN = 60_000
 
@@ -66,6 +66,35 @@ export const withLive = (days: Days, live: Live | null): Days =>
 /** The session's days up to now: its closed intervals and the activity in progress. */
 export const liveDays = (m: SessionMeasurement): Days => withLive(m.days, m.live)
 
+/** The subagents' days up to now: their closed intervals and the ones running. */
+export function liveAgentDays(m: SessionMeasurement): AgentRuns {
+  const out: AgentRuns = { ...m.agents }
+  for (const [id, live] of Object.entries(m.liveAgents ?? {})) out[id] = withLive(out[id] ?? {}, live)
+  return out
+}
+
+/**
+ * Brings the running subagents up to `now`: one no longer in `turns` closes there, one still in
+ * them goes on in the project it started in, and a new one starts in `project`.
+ */
+export function syncAgents(m: SessionMeasurement, now: number, project: string): SessionMeasurement {
+  const running = new Set(m.turns.map(t => t.slice(0, t.indexOf(':'))).filter(id => id !== 'main'))
+  const agents: AgentRuns = { ...m.agents }
+  const liveAgents: Record<string, Live> = {}
+  for (const [id, live] of Object.entries(m.liveAgents ?? {})) {
+    if (running.has(id)) liveAgents[id] = { ...live, last: now }
+    else agents[id] = withLive(agents[id] ?? {}, { ...live, last: now })
+  }
+  for (const id of running) liveAgents[id] ??= { project, start: now, last: now }
+  return { ...m, agents, liveAgents }
+}
+
+/** Sum of each subagent's time, plus the time worked with none of them running. */
+export function effortTime(worked: readonly Interval[], agents: readonly (readonly Interval[])[]): number {
+  const covered = agents.flat()
+  return agents.reduce((n, a) => n + total(a), 0) + total([...worked, ...covered]) - total(covered)
+}
+
 /** An instant of the session: when, in which project, and the inactivity limit in force. */
 export type Moment = { now: number; project: string; inactivityMs: number }
 
@@ -85,7 +114,7 @@ export function touch(m: SessionMeasurement, { now, project, inactivityMs }: Mom
 /** A manual pause starting at this moment: the activity in progress closes there. */
 export function startManualPause(m: SessionMeasurement, at: Moment): SessionMeasurement {
   const r = touch(m, at)
-  return { ...r, days: liveDays(r), live: null }
+  return { ...r, days: liveDays(r), live: null, agents: syncAgents({ ...r, turns: [] }, at.now, at.project).agents, liveAgents: {} }
 }
 
 /** With no activity for longer than the inactivity limit, the activity ends at its last active instant. */
@@ -102,3 +131,6 @@ export function formatDuration(ms: number): string {
 
 /** The items' times summed, as `Xh MMmin`. */
 export const formatTotal = (items: readonly { total: number }[]) => formatDuration(items.reduce((t, i) => t + i.total, 0))
+
+/** The days' time with subagents summed, as `Xh MMmin`. */
+export const formatEffort = (days: readonly { effort: number }[]) => formatDuration(days.reduce((t, d) => t + d.effort, 0))
