@@ -22,6 +22,9 @@ export const strings = {
     viewTree: 'Folders',
     allFolders: 'All folders',
     correct: 'Correct hours',
+    pickStart: 'Pick the first day, or press the month to see all of it.',
+    pickEnd: 'Now pick the last day.',
+    close: 'Close',
     before: 'before',
     to: 'to',
     // Manual pause.
@@ -55,6 +58,9 @@ export const strings = {
     viewTree: 'Pastas',
     allFolders: 'Todas as pastas',
     correct: 'Corrigir horas',
+    pickStart: 'Escolha o primeiro dia, ou pressione o mês para ver ele inteiro.',
+    pickEnd: 'Agora escolha o último dia.',
+    close: 'Fechar',
     before: 'antes',
     to: 'a',
     pause: '⏸ Pausar',
@@ -74,12 +80,24 @@ export const strings = {
 } satisfies Record<Lang, Record<string, string>>
 
 export const filters: Record<Lang, Record<Filter, string>> = {
-  en: { today: 'Today', week: 'Week', month: 'Month', all: 'All' },
-  pt: { today: 'Hoje', week: 'Semana', month: 'Mês', all: 'Tudo' },
+  en: { today: 'Today', week: 'Week', month: 'Month', all: 'All', custom: 'Dates' },
+  pt: { today: 'Hoje', week: 'Semana', month: 'Mês', all: 'Tudo', custom: 'Datas' },
 }
 
 const weekdays = { en: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], pt: ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'] }
-const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const monthNames = {
+  en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  pt: ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'],
+}
+
+/** A month (`YYYY-MM`) as the calendar titles it: `outubro de 2026` or `October 2026`. */
+export const monthTitle = (month: string, lang: Lang) =>
+  `${monthNames[lang][Number(month.slice(5)) - 1]}${lang === 'pt' ? ' de' : ''} ${month.slice(0, 4)}`
+
+/** The weekdays as the calendar's columns name them, Monday first. */
+export const weekHeads = (lang: Lang) => [...weekdays[lang].slice(1), weekdays[lang][0] ?? '']
+
+const months = monthNames.en.map(name => name.slice(0, 3))
 
 /** A day key's weekday: 0 is Sunday, 1 is Monday. */
 export const weekday = (day: string) => new Date(`${day}T00:00`).getDay()

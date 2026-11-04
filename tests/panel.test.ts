@@ -471,3 +471,51 @@ test('terminal: a corrected cell is marked, and corrections open from a button',
   await ui.press({ key: 'corrections-toggle' })
   expect(await days(ui)).toEqual([])
 })
+
+// ---- the period picker ----
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: the first press starts the period and the second ends it, as on a booking site`, { options: { language: 'pt' } }, async ($, on) => {
+    world(on, at(9, 0), sheetDays())
+    await startSession($)
+    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+    await ui.press({ key: 'period-open' })
+    expect((await ui.find({ key: 'cal-month' }))?.text).toContain('outubro de 2026')
+    expect(await ui.find({ key: 'cal-next' })).toBeUndefined() // nothing after this month
+    expect(await ui.find({ key: 'cal-day:2026-10-19' })).toBeUndefined() // tomorrow
+    await ui.press({ key: 'cal-day:2026-10-12' })
+    expect(await ui.find({ type: 'Text', text: /último dia/ })).toBeDefined()
+    await ui.press({ key: 'cal-day:2026-10-05' }) // earlier: starts again
+    await ui.press({ key: 'cal-day:2026-10-11' })
+    expect(await ui.find({ key: 'calendar' })).toBeUndefined()
+    expect((await ui.find({ key: 'period' }))?.text).toContain('05/10 a 11/10')
+    await ui.press({ key: 'view:tree' })
+    expect((await ui.find({ key: 'total' }))?.text).toBe('Total2h 00min')
+  })
+}
+
+test('terminal: pressing the month picks all of it, and the arrows reach other months', { options: { language: 'pt' } }, async ($, on) => {
+  world(on, at(9, 0), { ...sheetDays(), 'day:2026-09-30': { [`${W}/room/app-a`]: 60 * MIN } })
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 80 } as never })
+  await ui.press({ key: 'filter:custom' })
+  await ui.press({ key: 'cal-prev' })
+  expect((await ui.find({ key: 'cal-month' }))?.text).toContain('setembro de 2026')
+  await ui.press({ key: 'cal-month' })
+  expect((await ui.find({ key: 'period' }))?.text).toContain('01/09 a 30/09')
+  expect((await sheetRow(ui, 'sheet-total')).at(-1)).toBe('1h00')
+  // A month's period shows its weeks, each named by its first day.
+  expect(await sheetRow(ui, 'sheet-head')).toEqual(['01/09', '07/09', '14/09', '21/09', '28/09', 'Total'])
+})
+
+test('terminal: pressing the same day twice picks that one day, and a preset leaves the picked period', { options: { language: 'en' } }, async ($, on) => {
+  world(on, at(9, 0), sheetDays())
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+  await ui.press({ key: 'period-open' })
+  await ui.press({ key: 'cal-day:2026-10-13' })
+  await ui.press({ key: 'cal-day:2026-10-13' })
+  expect((await ui.find({ key: 'period' }))?.text).toContain('Tue Oct 13')
+  expect((await sheetRow(ui, 'sheet-total')).at(-1)).toBe('40min')
+  await ui.press({ key: 'filter:week' })
+  expect((await ui.find({ key: 'period' }))?.text).toContain('Oct 12 to Oct 18')
+})

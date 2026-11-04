@@ -3,9 +3,10 @@
 // the sheet to it. A drawing takes no press, so corrections open from a button under the sheet.
 // Pure: register.ts hands it the surface's elements, the data and what a press does.
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
-import type { CorrectionTarget, Filter, View } from '../types'
+import type { CorrectionTarget, Filter, PeriodPicker, View } from '../types'
+import { monthOf, monthWeeks } from './calendar'
 import { isSameTarget } from './corrections'
-import { dayLabel, filters, strings, type Lang } from './i18n'
+import { dayLabel, filters, monthTitle, strings, weekHeads, type Lang } from './i18n'
 import { buildSheet, periodLabel, sheetColumns, sheetHeight, sheetLines, sheetSvg } from './sheet'
 import { formatDuration, formatTotal } from './time'
 import { displayPath, folderName, relativeName, type FolderDay, type Node } from './tree'
@@ -32,6 +33,15 @@ export type PanelArgs = {
   range: readonly [string, string]
   offset: number
   onOffset: (offset: number) => unknown
+  /** The period picker, while open, and what its presses do. */
+  picker: PeriodPicker | null
+  today: string
+  /** Days with time worked: the calendar draws the others dim. */
+  workedDays: ReadonlySet<string>
+  onOpenPicker: () => unknown
+  onPickerMonth: (delta: number) => unknown
+  onPickDay: (day: string) => unknown
+  onPickMonth: () => unknown
   /** The folder the person narrowed the sheet to. */
   selected: string | null
   /** The folder rows are named against: the selected one, or the deepest holding every project. */
@@ -60,12 +70,13 @@ export type PanelArgs = {
 
 export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderElement {
   const { roots, surface, columns, view, onView, collapsed, lang, onToggle, paused, onPause, filter, onFilter } = args
-  const { range, offset, onOffset, selected, folder, days, onSelect, onClearSelection } = args
+  const { range, offset, onOffset, picker, today, workedDays, onOpenPicker, onPickerMonth, onPickDay, onPickMonth } = args
+  const { selected, folder, days, onSelect, onClearSelection } = args
   const { correctionsOpen, onCorrectionsOpen, correcting, onCorrect, onAdjust, onDelete, copy, onCopy } = args
   const { Box, Text, Button } = ui
   const s = strings[lang]
 
-  const hasPeriods = filter !== 'all'
+  const hasPeriods = filter !== 'all' && filter !== 'custom'
   const otherView = view === 'tree' ? 'days' : 'tree'
   const head = (
     <Box key="head" flexDirection="row" justifyContent="space-between" gap={2} marginBottom={1}>
@@ -75,7 +86,10 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
             ‹
           </Button>
         ) : null}
-        <Text bold>{hasPeriods ? periodLabel(filter, range, lang) : filters[lang].all}</Text>
+        <Button key="period-open" plain onPress={() => void onOpenPicker()}>
+          <Text bold>{filter === 'all' ? filters[lang].all : periodLabel(range, lang)}</Text>
+          <Text dimColor> ▾</Text>
+        </Button>
         {hasPeriods && offset < 0 ? (
           <Button key="next" plain dimColor onPress={() => void onOffset(offset + 1)}>
             ›
@@ -104,11 +118,68 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     </Box>
   )
 
+  // A day of the calendar: the period's ends inverted, the days between in blue, days without time dim.
+  const [from, to] = picker?.start ? [picker.start, picker.start] : filter === 'all' ? ['', ''] : range
+  const calendarDay = (day: string) => {
+    const label = String(Number(day.slice(8)))
+    if (day > today) return <Text dimColor>{label}</Text>
+    const isEnd = day === from || day === to
+    const isBetween = day > from && day < to
+    return (
+      <Button key={`cal-day:${day}`} plain onPress={() => void onPickDay(day)}>
+        <Text inverse={isEnd} bold={isEnd || day === today} underline={day === today} color={isBetween ? '#7fb2e5' : undefined} dimColor={!isEnd && !isBetween && !workedDays.has(day)}>
+          {label.padStart(2)}
+        </Text>
+      </Button>
+    )
+  }
+
+  const calendar = picker ? (
+    <Box key="calendar" flexDirection="column" marginBottom={1}>
+      <Box key="cal-head" flexDirection="row" justifyContent="space-between" gap={2}>
+        <Box key="cal-nav" flexDirection="row" gap={1}>
+          <Button key="cal-prev" plain dimColor onPress={() => void onPickerMonth(-1)}>
+            ‹
+          </Button>
+          <Button key="cal-month" plain onPress={() => void onPickMonth()}>
+            <Text bold>{monthTitle(picker.month, lang)}</Text>
+          </Button>
+          {picker.month < monthOf(today) ? (
+            <Button key="cal-next" plain dimColor onPress={() => void onPickerMonth(1)}>
+              ›
+            </Button>
+          ) : null}
+        </Box>
+        <Button key="cal-close" plain dimColor onPress={() => void onOpenPicker()}>
+          {s.close}
+        </Button>
+      </Box>
+      <Text dimColor>{picker.start ? s.pickEnd : s.pickStart}</Text>
+      <Box key="cal-heads" flexDirection="row">
+        {weekHeads(lang).map(name => (
+          <Box key={`cal-head:${name}`} width="14%">
+            <Text dimColor>{name}</Text>
+          </Box>
+        ))}
+      </Box>
+      {monthWeeks(picker.month).map((week, w) => (
+        <Box key={`cal-week:${w}`} flexDirection="row">
+          {week.map((day, i) => (
+            <Box key={`cal-cell:${w}:${i}`} width="14%">
+              {day ? calendarDay(day) : null}
+            </Box>
+          ))}
+        </Box>
+      ))}
+    </Box>
+  ) : null
+
   const top = (
     <Box key="top" flexDirection="column">
       {head}
       {paused ? <Text color="warning">{s.paused}</Text> : null}
       {controls}
+      {calendar}
     </Box>
   )
 

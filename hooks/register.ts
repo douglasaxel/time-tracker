@@ -4,6 +4,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface, Timer } from 'claude-code'
 import type { Correction, Corrections, DayTotals, Days, SessionMeasurement, SessionRecord } from '../types'
+import { monthOf, monthRange, shiftMonth } from './calendar'
 import { applyCorrections, isSameTarget, nextCorrection, parseMinutes } from './corrections'
 import { isPortuguese, strings, type Lang } from './i18n'
 import { correctionsKey, dayOfKey, isClosedDayKey, isCorrectionsKey, isLedgerKey, ledger, sessionKey } from './ledger'
@@ -27,6 +28,8 @@ const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'wee
 const viewAtom = atom({ plugin: 'time-tracker', key: 'view' } as const, 'days')
 const offsetAtom = atom({ plugin: 'time-tracker', key: 'offset' } as const, 0)
 const correctionsOpenAtom = atom({ plugin: 'time-tracker', key: 'correctionsOpen' } as const, false)
+const pickerAtom = atom({ plugin: 'time-tracker', key: 'picker' } as const, null)
+const customRangeAtom = atom({ plugin: 'time-tracker', key: 'customRange' } as const, null)
 const selectedAtom = atom({ plugin: 'time-tracker', key: 'selected' } as const, null)
 const correctingAtom = atom({ plugin: 'time-tracker', key: 'correcting' } as const, null)
 const copyAtom = atom({ plugin: 'time-tracker', key: 'copy' } as const, null)
@@ -274,14 +277,22 @@ export const register: Register = (on, options) => {
     const filter = await read($, filterAtom)
     const corrections = await read($, correctionsAtom)
     const offset = await read($, offsetAtom)
-    const range = period(filter, await $.clock.now(), offset)
-    const days = inPeriod(applyCorrections(measuredDays(m), corrections), range)
+    const now = await $.clock.now()
+    const today = dayKey(now)
+    const customRange = await read($, customRangeAtom)
+    const range = filter === 'custom' && customRange ? customRange : period(filter, now, offset)
+    const allDays = applyCorrections(measuredDays(m), corrections)
+    const days = inPeriod(allDays, range)
+    const picker = await read($, pickerAtom)
     const selected = await read($, selectedAtom)
     const totals = projectTotals(days)
     // The selected folder, or the deepest one holding every project: what names the rows and the table.
     const folder = selected ?? commonFolder(Object.keys(totals))
     const shown = folderDays(days, folder, corrections)
     const clearCopy = () => update($, copyAtom, () => null)
+    const openPicker = () => update($, pickerAtom, p => (p ? null : { month: monthOf(range[1] < today ? range[1] : today), start: null }))
+    const applyRange = (r: [string, string]) =>
+      Promise.all([update($, customRangeAtom, () => r), update($, filterAtom, () => 'custom'), update($, pickerAtom, () => null), clearCopy()])
     return panel($.ui.resolve(e), {
       roots: buildTree(totals),
       surface: e.surface,
@@ -297,7 +308,19 @@ export const register: Register = (on, options) => {
       selected,
       folder,
       days: shown,
-      onFilter: f => Promise.all([update($, filterAtom, () => f), update($, offsetAtom, () => 0), clearCopy()]),
+      onFilter: f =>
+        f === 'custom'
+          ? openPicker()
+          : Promise.all([update($, filterAtom, () => f), update($, offsetAtom, () => 0), update($, pickerAtom, () => null), clearCopy()]),
+      picker,
+      today,
+      workedDays: new Set(Object.entries(allDays).filter(([, ps]) => Object.values(ps).some(ms => ms > 0)).map(([d]) => d)),
+      onOpenPicker: openPicker,
+      onPickerMonth: delta => update($, pickerAtom, p => p && { ...p, month: shiftMonth(p.month, delta) }),
+      // The first press starts the period; a later day (or the start again) ends it; an earlier day starts it again.
+      onPickDay: day =>
+        picker?.start && day >= picker.start ? applyRange([picker.start, day]) : update($, pickerAtom, p => p && { ...p, start: day }),
+      onPickMonth: () => (picker ? applyRange(monthRange(picker.month)) : undefined),
       range,
       offset,
       onOffset: n => Promise.all([update($, offsetAtom, () => Math.min(0, n)), clearCopy()]),

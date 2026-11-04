@@ -36,8 +36,11 @@ export type SessionMeasurement = {
   turns: string[]
 }
 
-/** The /horas panel's period: today, this week (Monday to Sunday), this month, or every day. */
-export type Filter = 'today' | 'week' | 'month' | 'all'
+/** The /horas panel's period: today, this week (Monday to Sunday), this month, every day, or the days picked on the calendar. */
+export type Filter = 'today' | 'week' | 'month' | 'all' | 'custom'
+
+/** The open period picker: the month it shows and the day the person started the period on. */
+export type PeriodPicker = { month: string; start: string | null }
 
 /** What the /horas panel shows: the timesheet of projects by day, or the tree of folders. */
 export type View = 'days' | 'tree'
@@ -56,6 +59,10 @@ declare module 'claude-code' {
       /** Periods before the current one the panel shows: -1 is last week, on the week filter. */
       offset: number
       correctionsOpen: boolean
+      /** The period picker, while open. */
+      picker: PeriodPicker | null
+      /** The first and last day picked on the calendar, for the custom filter. */
+      customRange: [string, string] | null
       /** The folder whose days the /horas panel lists, if any. */
       selected: string | null
       /** Manual pause of this session: while on, no activity is recorded. */

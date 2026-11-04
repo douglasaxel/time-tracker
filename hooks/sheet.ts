@@ -20,11 +20,13 @@ const cellText = (ms: number, corrected = false) => (ms > 0 || corrected ? `${ce
 const clip = (t: string, max: number) => (t.length > max ? `${t.slice(0, max - 1)}…` : t)
 
 /** A day as a period label writes it, without its weekday: `12/10` or `Oct 12`. */
-const shortDay = (day: string, lang: Lang) => dayLabel(day, lang).split(' ').slice(1).join(' ')
+const shortDay = (day: string, lang: Lang, withYear: boolean) => dayLabel(day, lang, withYear).split(' ').slice(1).join(' ')
 
-/** The period as the header writes it: one day with its weekday, or from one day to another. */
-export function periodLabel(filter: Filter, [from, to]: readonly [string, string], lang: Lang): string {
-  return filter === 'today' ? dayLabel(from, lang) : `${shortDay(from, lang)} ${strings[lang].to} ${shortDay(to, lang)}`
+/** The period as the header writes it: one day with its weekday, or from one day to another, with the year when they differ in it. */
+export function periodLabel([from, to]: readonly [string, string], lang: Lang): string {
+  if (from === to) return dayLabel(from, lang)
+  const withYear = from.slice(0, 4) !== to.slice(0, 4)
+  return `${shortDay(from, lang, withYear)} ${strings[lang].to} ${shortDay(to, lang, withYear)}`
 }
 
 const everyDay = (from: string, to: string): string[] => {
@@ -40,10 +42,15 @@ const everyDay = (from: string, to: string): string[] => {
 /** Most months a sheet of every day shows; older ones join one column. */
 const MAX_MONTHS = 8
 
-/** The columns of a period: its days for a week or a day, its weeks for a month, the months for all time. */
+/** Most days a picked period shows one by one, and most it shows as weeks; longer ones show months. */
+const MAX_DAY_COLUMNS = 8
+const MAX_WEEK_DAYS = 70
+
+/** The columns of a period: its days for a week or a day, its weeks for a month, the months for all time; a picked period by its length. */
 export function sheetColumns(filter: Filter, range: readonly [string, string], days: readonly FolderDay[], lang: Lang): SheetColumn[] {
   const [from, to] = range
-  if (filter === 'all') {
+  const length = filter === 'custom' ? everyDay(from, to).length : 0
+  if (filter === 'all' || length > MAX_WEEK_DAYS) {
     const months = [...new Set(days.map(d => d.day.slice(0, 7)))].sort()
     const recent = months.slice(-MAX_MONTHS)
     const columns = recent.map(m => ({ from: `${m}-01`, to: `${m}-31`, head: `${m.slice(5)}/${m.slice(2, 4)}`, sub: '' }))
@@ -51,14 +58,18 @@ export function sheetColumns(filter: Filter, range: readonly [string, string], d
     if (oldest && months.length > recent.length) columns.unshift({ from: '', to: `${oldest}-00`, head: strings[lang].before, sub: '' })
     return columns
   }
-  if (filter === 'month') {
+  if (filter === 'month' || length > MAX_DAY_COLUMNS) {
     const weeks: SheetColumn[] = []
     for (const day of everyDay(from, to)) {
       const last = weeks.at(-1)
       if (last && weekday(day) !== 1) last.to = day
       else weeks.push({ from: day, to: day, head: '', sub: '' })
     }
-    return weeks.map(w => ({ ...w, head: w.from.slice(8), sub: `${strings[lang].to} ${w.to.slice(8)}` }))
+    return weeks.map(w => ({
+      ...w,
+      head: filter === 'custom' ? `${w.from.slice(8)}/${w.from.slice(5, 7)}` : w.from.slice(8),
+      sub: `${strings[lang].to} ${w.to.slice(8)}`,
+    }))
   }
   return everyDay(from, to).map(day => ({ from: day, to: day, head: dayLabel(day, lang).split(' ')[0] ?? '', sub: day.slice(8) }))
 }
