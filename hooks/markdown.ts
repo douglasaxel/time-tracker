@@ -20,7 +20,7 @@ export function markdownTable(folder: string, days: readonly FolderDay[], filter
     d.entries.map(e => `| ${dayLabel(d.day, lang, true)} | ${relativeName(e.project, folder)} | ${formatDuration(e.ms)}${e.corrected ? ' *' : ''} |`),
   )
   return [
-    `## ${folderName(folder)} · ${filters[lang][filter]}, ${when}`,
+    `## ${folderName(folder) || s.total} · ${filters[lang][filter]}, ${when}`,
     '',
     `| ${s.colDate} | ${s.colProject} | ${s.colHours} |`,
     '| --- | --- | ---: |',

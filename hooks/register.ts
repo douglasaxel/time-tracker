@@ -11,7 +11,7 @@ import { markdownTable } from './markdown'
 import { panel } from './panel'
 import { statusText } from './status'
 import { MIN, dayKey, expire, liveDays, period, startManualPause, touch, type Moment } from './time'
-import { buildTree, dayTotals, folderDays, inPeriod, projectTotals, resolvePath, toSlashes } from './tree'
+import { buildTree, commonFolder, dayTotals, folderDays, inPeriod, projectTotals, resolvePath, toSlashes } from './tree'
 
 const empty: SessionMeasurement = { id: null, days: {}, live: null, turns: [] }
 const measurementAtom = atom({ plugin: 'time-tracker', key: 'measurement' } as const, empty)
@@ -23,7 +23,8 @@ const pausedAtom = atom({ plugin: 'time-tracker', key: 'paused' } as const, fals
 const correctionsAtom = atom({ plugin: 'time-tracker', key: 'corrections' } as const, {} as Corrections)
 // The /horas panel's state.
 const collapsedAtom = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
-const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'all')
+const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'week')
+const viewAtom = atom({ plugin: 'time-tracker', key: 'view' } as const, 'days')
 const selectedAtom = atom({ plugin: 'time-tracker', key: 'selected' } as const, null)
 const correctingAtom = atom({ plugin: 'time-tracker', key: 'correcting' } as const, null)
 const copyAtom = atom({ plugin: 'time-tracker', key: 'copy' } as const, null)
@@ -273,27 +274,36 @@ export const register: Register = (on, options) => {
     const range = period(filter, await $.clock.now())
     const days = inPeriod(applyCorrections(measuredDays(m), corrections), range)
     const selected = await read($, selectedAtom)
-    const shown = selected ? folderDays(days, selected, corrections) : []
+    const totals = projectTotals(days)
+    // The selected folder, or the deepest one holding every project: what names the rows and the table.
+    const folder = selected ?? commonFolder(Object.keys(totals))
+    const shown = folderDays(days, folder, corrections)
     const clearCopy = () => update($, copyAtom, () => null)
     return panel($.ui.resolve(e), {
-      roots: buildTree(projectTotals(days)),
+      roots: buildTree(totals),
+      surface: e.surface,
+      columns: e.props.bodyColumns || 40,
+      view: await read($, viewAtom),
+      onView: v => update($, viewAtom, () => v),
       collapsed: await read($, collapsedAtom),
       lang,
       onToggle: path => update($, collapsedAtom, c => (c.includes(path) ? c.filter(p => p !== path) : [...c, path])),
       paused: await read($, pausedAtom),
       onPause: () => quiet(togglePause($)),
       filter,
-      selected: selected ? { path: selected, days: shown } : null,
+      selected,
+      folder,
+      days: shown,
       onFilter: f => Promise.all([update($, filterAtom, () => f), clearCopy()]),
       onSelect: path =>
-        Promise.all([update($, selectedAtom, () => path), update($, collapsedAtom, c => c.filter(p => p !== path)), clearCopy()]),
-      onPick: path => Promise.all([update($, selectedAtom, s => (s === path ? null : path)), clearCopy()]),
+        Promise.all([update($, selectedAtom, () => path), update($, viewAtom, () => 'days'), clearCopy()]),
+      onClearSelection: () => Promise.all([update($, selectedAtom, () => null), clearCopy()]),
       correcting: await read($, correctingAtom),
       onCorrect: target => update($, correctingAtom, t => (isSameTarget(t, target) ? null : target)),
       onAdjust: text => quiet(correct($, parseMinutes(text))),
       onDelete: () => quiet(correct($, 'delete')),
       copy: await read($, copyAtom),
-      onCopy: surface => quiet(copyTable($, selected ? markdownTable(selected, shown, filter, range, lang) : '', surface)),
+      onCopy: surface => quiet(copyTable($, markdownTable(folder, shown, filter, range, lang), surface)),
     })
   })
 }

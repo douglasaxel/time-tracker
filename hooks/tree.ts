@@ -61,16 +61,23 @@ export function resolvePath(base: string, path: string): string {
 /** How the panel shows `text`, a part of `path`: with backslashes when `path` is a Windows path. */
 export const displayPath = (text: string, path: string) => (/^[a-z]:/i.test(path) ? text.split('/').join('\\') : text)
 
-const withSlash = (folder: string) => (folder.endsWith('/') ? folder : `${folder}/`)
+const withSlash = (folder: string) => (!folder || folder.endsWith('/') ? folder : `${folder}/`)
 
-/** The last name in a path: what the status line and the copied table call a project or folder. */
+/** The deepest folder holding every path; '' when they share none (two disks). */
+export function commonFolder(paths: readonly string[]): string {
+  const [first = [], ...rest] = paths.map(p => p.split('/'))
+  const differs = first.findIndex((part, i) => rest.some(parts => parts[i] !== part))
+  return (differs < 0 ? first : first.slice(0, differs)).join('/')
+}
+
+/** The last name in a path: what the status line, the panel and the copied table call a project or folder. */
 export const folderName = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path
 
 /** How a row inside `folder` names `project`: its path relative to the folder, or the folder's name. */
 export const relativeName = (project: string, folder: string) =>
   project === folder ? folderName(folder) : project.slice(withSlash(folder).length)
 
-/** One project's time on one day, inside the selected folder; `corrected` marks a correction. */
+/** One project's time on one day, inside a folder; `corrected` marks a correction. */
 export type Entry = { project: string; ms: number; corrected: boolean }
 export type FolderDay = { day: string; total: number; corrected: boolean; entries: Entry[] }
 

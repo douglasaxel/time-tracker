@@ -49,6 +49,12 @@ const earlier = (projects: Record<string, number>) => ({
 const startSession = ($: TestEngine) => $.session.start({ cwd: `${W}/room/app-a`, surface: 'terminal', isInteractive: true })
 const horas = ($: TestEngine) => $.command.run({ command: 'horas', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
 
+/** The tree over every day: the panel opens on this week's days. */
+async function showTree(ui: { press: (t: { key: string }) => Promise<unknown> }) {
+  await ui.press({ key: 'filter:all' })
+  await ui.press({ key: 'view:tree' })
+}
+
 /** The tree as the person reads it: one line per folder, its toggle or dot, its name and its total. */
 async function tree(ui: { findAll: (q: { type: 'Box' }) => Promise<{ key?: string; text: string }[]> }) {
   return (await ui.findAll({ type: 'Box' }))
@@ -76,6 +82,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     }))
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     expect(await tree(ui)).toEqual([
       `▾ ${WIN} 1h 55min`,
       '· personal\\site 0h 15min',
@@ -89,6 +96,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world(on, at(9, 0), earlier({ [`${W}/room/app-a`]: 60, [`${W}/room/app-b`]: 30, [`${W}/personal/site`]: 15 }))
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     await ui.press({ key: `toggle:${W}/room` })
     expect(await tree(ui)).toEqual([`▾ ${WIN} 1h 45min`, '· personal\\site 0h 15min', '▸ room 1h 30min'])
     await ui.press({ key: `toggle:${W}` })
@@ -98,24 +106,28 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await tree(ui)).toHaveLength(5)
   })
 
-  test(`${surface}: pressing a folder's name selects it and opens it`, { options: { language: 'en' } }, async ($, on) => {
+  test(`${surface}: pressing a folder shows its days, and All folders takes it off`, { options: { language: 'en' } }, async ($, on) => {
     world(on, at(9, 0), earlier({ [`${W}/room/app-a`]: 60, [`${W}/room/app-b`]: 30, [`${W}/personal/site`]: 15 }))
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
-    await ui.press({ key: `toggle:${W}/room` })
+    await showTree(ui)
     await ui.press({ key: `node:${W}/room` })
+    expect(await tree(ui)).toEqual([])
+    expect(await days(ui)).toEqual(['Sat Oct 17 1h 30min'])
+    expect(await entries(ui)).toEqual(['app-a 1h 00min', 'app-b 0h 30min'])
+    // All folders takes the selection off, and the tree is one press away.
+    await ui.press({ key: 'clear-selection' })
+    expect(await days(ui)).toEqual(['Sat Oct 17 1h 45min'])
+    await ui.press({ key: 'view:tree' })
+    expect(await days(ui)).toEqual([])
     expect(await tree(ui)).toContain('▾ room 1h 30min')
-    expect(await tree(ui)).toContain('· app-a 1h 00min')
-    expect(await days(ui)).toEqual(['Sat Oct 17 1h 30min'])
-    // Pressing it again keeps it selected and open.
-    await ui.press({ key: `node:${W}/room` })
-    expect(await days(ui)).toEqual(['Sat Oct 17 1h 30min'])
   })
 
   test(`${surface}: with no time yet the panel says how time is counted`, { options: { language: 'en' } }, async ($, on) => {
     world(on, at(9, 0))
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     expect(await tree(ui)).toEqual([])
     expect((await ui.find({ type: 'Text', text: /No time worked yet/ }))?.text).toBeDefined()
   })
@@ -125,6 +137,7 @@ test('the panel redraws each minute while the session is active', { options: { l
   const w = world(on, at(9, 0), earlier({ [`${W}/room/app-b`]: 30 }))
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await showTree(ui)
   await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
   await $.turn.start({ text: 'go', turnId: 't1' })
   await w.clock.advance(20 * MIN)
@@ -143,6 +156,7 @@ test('the tree counts every session once, closed days included', { options: { la
   })
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await showTree(ui)
   await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
   await $.turn.start({ text: 'go', turnId: 't1' })
   await w.clock.advance(21 * MIN)
@@ -170,6 +184,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world(on, at(9, 0), spread())
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     const total = async () => (await ui.find({ key: 'total' }))?.text
     await ui.press({ key: 'filter:today' })
     expect(await tree(ui)).toEqual([`· ${WIN}\\room\\app-a 0h 05min`])
@@ -187,17 +202,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world(on, at(9, 0), spread())
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     expect(await days(ui)).toEqual([])
     await ui.press({ key: 'filter:week' })
     await ui.press({ key: `pick:${W}/room` })
-    expect(await days(ui)).toEqual(['seg 12/10 0h 15min', 'dom 18/10 0h 05min'])
+    expect(await days(ui)).toEqual(['dom 18/10 0h 05min', 'seg 12/10 0h 15min'])
     await ui.press({ key: 'filter:all' })
-    expect(await days(ui)).toEqual(['qua 30/09 0h 40min', 'qui 01/10 0h 30min', 'dom 11/10 0h 20min', 'seg 12/10 0h 15min', 'dom 18/10 0h 05min'])
+    expect(await days(ui)).toEqual(['dom 18/10 0h 05min', 'seg 12/10 0h 15min', 'dom 11/10 0h 20min', 'qui 01/10 0h 30min', 'qua 30/09 0h 40min'])
+    await ui.press({ key: 'view:tree' })
     await ui.press({ key: `pick:${W}/room/app-b` })
     await ui.press({ key: 'filter:month' })
-    expect(await days(ui)).toEqual(['qui 01/10 0h 30min', 'seg 12/10 0h 15min'])
-    await ui.press({ key: `pick:${W}/room/app-b` })
-    expect(await days(ui)).toEqual([])
+    expect(await days(ui)).toEqual(['seg 12/10 0h 15min', 'qui 01/10 0h 30min'])
+    await ui.press({ key: 'clear-selection' })
+    expect(await days(ui)).toEqual(['dom 18/10 0h 05min', 'seg 12/10 0h 15min', 'dom 11/10 0h 20min', 'qui 01/10 0h 30min'])
   })
 }
 
@@ -205,6 +222,7 @@ test('an activity from 23:50 to 0:10 counts 10 minutes on each day', { options: 
   const w = world(on, at(23, 50, 17))
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await showTree(ui)
   await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
   await $.turn.start({ text: 'go', turnId: 't1' })
   await w.clock.advance(20 * MIN)
@@ -212,12 +230,12 @@ test('an activity from 23:50 to 0:10 counts 10 minutes on each day', { options: 
   expect(await tree(ui)).toEqual([`· ${WIN}\\room\\app-a 0h 10min`])
   await ui.press({ key: 'filter:all' })
   await ui.press({ key: `pick:${W}/room/app-a` })
-  expect(await days(ui)).toEqual(['Sat Oct 17 0h 10min', 'Sun Oct 18 0h 10min'])
+  expect(await days(ui)).toEqual(['Sun Oct 18 0h 10min', 'Sat Oct 17 0h 10min'])
 })
 // ---- corrections ----
 /** The selected folder's rows that take a correction: each project on each day, with its time and mark. */
 async function entries(ui: { findAll: (q: { type: 'Box' }) => Promise<{ key?: string; text: string }[]> }) {
-  return (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('entry:')).map(b => b.text.replace(/(\S)(\d+h \d\dmin)/, '$1 $2'))
+  return (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('entry:')).map(b => b.text.replace(/^●\s*/, '').replace(/(\S)(\d+h \d\dmin)/, '$1 $2'))
 }
 
 /** Two projects on Monday, one on Tuesday. */
@@ -231,14 +249,15 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world(on, at(9, 0), twoProjects())
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     await ui.press({ key: `pick:${W}/room` })
-    expect(await entries(ui)).toEqual(['app-a 0h 20min', 'app-b 0h 15min', 'app-a 0h 40min'])
+    expect(await entries(ui)).toEqual(['app-a 0h 40min', 'app-a 0h 20min', 'app-b 0h 15min'])
 
     // −30 on a 20-minute day shows 0, marked.
     await ui.press({ key: `fix:2026-10-12|${W}/room/app-a` })
     await ui.input({ key: 'adjust', text: '-30', kind: 'submit' })
-    expect(await entries(ui)).toEqual(['app-a 0h 00min *', 'app-b 0h 15min', 'app-a 0h 40min'])
-    expect(await days(ui)).toEqual(['seg 12/10 0h 15min *', 'ter 13/10 0h 40min'])
+    expect(await entries(ui)).toEqual(['app-a 0h 40min', 'app-b 0h 15min', 'app-a 0h 00min *'])
+    expect(await days(ui)).toEqual(['ter 13/10 0h 40min', 'seg 12/10 0h 15min *'])
     // Adding back starts from what is shown.
     await ui.input({ key: 'adjust', text: '+10', kind: 'submit' })
     expect(await entries(ui)).toContain('app-a 0h 10min *')
@@ -246,19 +265,21 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // Delete zeroes the project's day; the other project keeps its time.
     await ui.press({ key: `fix:2026-10-13|${W}/room/app-a` })
     await ui.press({ key: 'delete' })
-    expect(await entries(ui)).toEqual(['app-a 0h 10min *', 'app-b 0h 15min', 'app-a 0h 00min *'])
+    expect(await entries(ui)).toEqual(['app-a 0h 00min *', 'app-b 0h 15min', 'app-a 0h 10min *'])
+    await ui.press({ key: 'view:tree' })
     expect(await tree(ui)).toEqual([`▾ ${WIN}\\room 0h 25min`, '· app-a 0h 10min', '· app-b 0h 15min'])
   })
 
-  test(`${surface}: a project's own days take the correction on the day row`, { options: { language: 'en' } }, async ($, on) => {
+  test(`${surface}: a project's own days name it and take the correction`, { options: { language: 'en' } }, async ($, on) => {
     world(on, at(9, 0), twoProjects())
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     await ui.press({ key: `pick:${W}/room/app-a` })
-    expect(await entries(ui)).toEqual([])
+    expect(await entries(ui)).toEqual(['app-a 0h 40min', 'app-a 0h 20min'])
     await ui.press({ key: `fix:2026-10-13|${W}/room/app-a` })
     await ui.input({ key: 'adjust', text: '15', kind: 'submit' })
-    expect(await days(ui)).toEqual(['Mon Oct 12 0h 20min', 'Tue Oct 13 0h 55min *'])
+    expect(await days(ui)).toEqual(['Tue Oct 13 0h 55min *', 'Mon Oct 12 0h 20min'])
   })
 }
 
@@ -267,18 +288,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const w = world(on, at(9, 0), earlier({ [`${W}/room/app-a`]: 30 }))
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
     await $.turn.start({ text: 'go', turnId: 't1' })
     await w.clock.advance(10 * MIN)
     await ui.press({ key: `pick:${W}/room/app-a` })
-    expect(await days(ui)).toEqual(['sáb 17/10 0h 30min', 'dom 18/10 0h 10min'])
+    expect(await days(ui)).toEqual(['dom 18/10 0h 10min', 'sáb 17/10 0h 30min'])
     await ui.press({ key: `fix:2026-10-18|${W}/room/app-a` })
     await ui.press({ key: 'delete' })
     await w.clock.advance(5 * MIN)
-    expect(await days(ui)).toEqual(['sáb 17/10 0h 30min', 'dom 18/10 0h 00min *'])
+    expect(await days(ui)).toEqual(['dom 18/10 0h 00min *', 'sáb 17/10 0h 30min'])
     await ui.input({ key: 'adjust', text: '+10', kind: 'submit' })
     await w.clock.advance(5 * MIN)
-    expect(await days(ui)).toEqual(['sáb 17/10 0h 30min', 'dom 18/10 0h 10min *'])
+    expect(await days(ui)).toEqual(['dom 18/10 0h 10min *', 'sáb 17/10 0h 30min'])
   })
 }
 
@@ -289,6 +311,7 @@ test('a correction is kept in the store, survives the day closing and applies to
   const w = world(on, at(23, 50, 17), store)
   await startSession($)
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: {} as never })
+  await showTree(ui)
   await ui.press({ key: `pick:${W}/room/app-b` })
   await ui.press({ key: `fix:2026-10-17|${W}/room/app-b` })
   await ui.input({ key: 'adjust', text: '-10', kind: 'submit' })
@@ -297,6 +320,7 @@ test('a correction is kept in the store, survives the day closing and applies to
   expect(store['session:sess-0']).toBeUndefined()
   expect(store['day:2026-10-17']).toEqual({ [`${W}/room/app-b`]: 30 * MIN })
   expect(await days(ui)).toEqual(['sáb 17/10 0h 20min *'])
+  await ui.press({ key: 'view:tree' })
   expect(await tree(ui)).toEqual([`· ${WIN}\\room\\app-b 0h 20min`])
 })
 // ---- copy as Markdown ----
@@ -314,6 +338,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const w = world(on, at(9, 0), report())
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     await ui.press({ key: 'filter:week' })
     await ui.press({ key: `pick:${W}/room` })
     await ui.press({ key: 'copy' })
@@ -340,6 +365,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     w.clipboard.works = false
     await startSession($)
     const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    await showTree(ui)
     await ui.press({ key: `pick:${W}/room/app-b` })
     await ui.press({ key: 'copy' })
     const table = [
@@ -356,3 +382,37 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.find({ key: 'copied-table' }))?.text).toContain('| Mon Oct 12, 2026 | app-b | 3h 00min |')
   })
 }
+
+// ---- the days view ----
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: the panel opens on this week's days, newest first, with each project's time named from their common folder`, { options: { language: 'pt' } }, async ($, on) => {
+    world(on, at(9, 0), {
+      'day:2026-10-11': { [`${W}/room/app-a`]: 90 * MIN }, // the Sunday before this week: left out
+      'day:2026-10-12': { [`${W}/room/app-a`]: 20 * MIN, [`${W}/personal/site`]: 15 * MIN },
+      'day:2026-10-13': { [`${W}/room/app-a`]: 40 * MIN },
+    })
+    await startSession($)
+    const ui = await $.ui.mount({ plugin: 'time-tracker', surface, component: 'Pane', requestId: PANE, props: {} as never })
+    expect(await days(ui)).toEqual(['ter 13/10 0h 40min', 'seg 12/10 0h 35min'])
+    expect(await entries(ui)).toEqual(['room\\app-a 0h 40min', 'room\\app-a 0h 20min', 'personal\\site 0h 15min'])
+    expect(await tree(ui)).toEqual([])
+  })
+}
+
+test('terminal: a day bar is as long as its hours against the longest day, split by project', { options: { language: 'en' } }, async ($, on) => {
+  world(on, at(9, 0), twoProjects())
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 42 } as never })
+  const blocks = async (day: string) => ((await ui.find({ key: `block:${day}` }))?.text.match(/█/g) ?? []).length
+  expect(await blocks('2026-10-13')).toBe(40) // the longest day fills the width
+  expect(await blocks('2026-10-12')).toBe(35) // 20 + 15 of its 40 minutes
+})
+
+test('desktop: each day with time draws one bar with a part per project', { options: { language: 'en' } }, async ($, on) => {
+  world(on, at(9, 0), twoProjects())
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'desktop', component: 'Pane', requestId: PANE, props: { bodyColumns: 42 } as never })
+  const bars = (await ui.findAll({ type: 'Svg' })) as unknown as { props?: { source?: string }; source?: string }[]
+  const parts = bars.map(b => ((b.props?.source ?? b.source ?? '').match(/<rect/g) ?? []).length)
+  expect(parts).toEqual([1, 2])
+})
