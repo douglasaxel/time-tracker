@@ -18,6 +18,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   on('ui.status', (_, e) => { statuses.push(e.text); return { value: undefined } })
   on('command.register', () => ({ value: { command: 'horas' } }))
   on('session.root', () => ({ value: A }))
+  on('session.surfaces', () => ({ value: ['terminal'] }))
   on('session.cwd', () => ({ value: A }))
   on('session.repo', () => ({ value: null }))
   on('session.id', () => ({ value: 'sess-1' }))

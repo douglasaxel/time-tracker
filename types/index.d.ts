@@ -68,6 +68,8 @@ declare module 'claude-code' {
       collapsed: string[]
       /** The /horas panel's period. */
       filter: Filter
+      /** The time under the prompt: the desktop draws it as a button that opens the panel. */
+      statusLine: string
       view: View
       measure: Measure
       /** Periods before the current one the panel shows: -1 is last week, on the week filter. */

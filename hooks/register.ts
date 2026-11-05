@@ -9,7 +9,7 @@ import { applyCorrections, isSameTarget, nextCorrection, parseMinutes } from './
 import { isPortuguese, strings, type Lang } from './i18n'
 import { correctionsKey, dayOfKey, isClosedDayKey, isCorrectionsKey, isEffortKey, isLedgerKey, ledger, merge, mergeAgents, sessionKey } from './ledger'
 import { markdownTable } from './markdown'
-import { panel } from './panel'
+import { panel, promptHint } from './panel'
 import { statusText } from './status'
 import { MIN, dayKey, expire, liveAgentDays, liveDays, period, startManualPause, syncAgents, touch, type Moment } from './time'
 import { buildTree, commonFolder, dayEfforts, dayTotals, folderDays, inPeriod, projectTotals, toSlashes } from './tree'
@@ -25,6 +25,7 @@ const correctionsAtom = atom({ plugin: 'time-tracker', key: 'corrections' } as c
 // The /horas panel's state.
 const collapsedAtom = atom({ plugin: 'time-tracker', key: 'collapsed' } as const, [])
 const filterAtom = atom({ plugin: 'time-tracker', key: 'filter' } as const, 'week')
+const statusLineAtom = atom({ plugin: 'time-tracker', key: 'statusLine' } as const, '')
 const viewAtom = atom({ plugin: 'time-tracker', key: 'view' } as const, 'days')
 const measureAtom = atom({ plugin: 'time-tracker', key: 'measure' } as const, 'real')
 const offsetAtom = atom({ plugin: 'time-tracker', key: 'offset' } as const, 0)
@@ -120,7 +121,10 @@ async function persist($: EngineInterface, m: SessionMeasurement) {
 async function showStatus($: EngineInterface, m: SessionMeasurement, now: number) {
   const p = m.live?.project ?? (await project($))
   const today = applyCorrections(measuredDays(m), await read($, correctionsAtom))[dayKey(now)]?.[p] ?? 0
-  $.ui.status(statusText(today, p, lang, await read($, pausedAtom)))
+  const text = statusText(today, p, lang, await read($, pausedAtom))
+  await update($, statusLineAtom, () => text)
+  // The desktop draws it as a button in the line under the prompt, so the plain line would repeat it.
+  $.ui.status((await $.session.surfaces()).includes('desktop') ? undefined : text)
 }
 
 /** An active instant now: a prompt, a step's start or end, a turn's start or end. */
@@ -206,6 +210,16 @@ async function correct($: EngineInterface, change: number | 'delete' | undefined
   await showStatus($, await read($, measurementAtom), await $.clock.now())
 }
 
+/** Opens the panel, or closes it when it is up; true when it ends up open. */
+async function togglePane($: EngineInterface): Promise<boolean> {
+  if ((await $.ui.panes()).some(p => p.id === PANE)) {
+    await $.ui.close({ id: PANE })
+    return false
+  }
+  await $.ui.open({ id: PANE, title: strings[lang].pane })
+  return true
+}
+
 /** Copies the table as drawn; a desktop may refuse the copy, so the outcome is always kept to show. */
 async function copyTable($: EngineInterface, text: string, surface: RenderSurface) {
   const r = await $.ui.copy({ text, surface }).catch(() => ({ isCopied: false }))
@@ -276,13 +290,13 @@ export const register: Register = (on, options) => {
   })
 
   // The /horas panel: the command toggles the pane; the drawing reads the measurement, so each tick redraws it.
-  on('command.run', { command: 'horas' }, async $ => {
-    if ((await $.ui.panes()).some(p => p.id === PANE)) {
-      await $.ui.close({ id: PANE })
-      return { text: strings[lang].closed }
-    }
-    await $.ui.open({ id: PANE, title: strings[lang].pane })
-    return { text: strings[lang].opened }
+  on('command.run', { command: 'horas' }, async $ => ({ text: (await togglePane($)) ? strings[lang].opened : strings[lang].closed }))
+
+  // The terminal keeps Claude's own line, whose pills a drawn tree would replace, and the plain status line.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const status = await read($, statusLineAtom)
+    if (e.surface !== 'desktop' || !status) return next(e)
+    return promptHint($.ui.resolve(e), e.props.hint, status, () => quiet(togglePane($)))
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

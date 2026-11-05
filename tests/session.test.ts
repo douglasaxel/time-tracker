@@ -18,6 +18,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}, isEnv
   const cwd = () => session.cwd ?? session.root
   const repoRoot = () => session.repos[cwd()]
   on('session.root', () => ({ value: session.root }))
+  on('session.surfaces', () => ({ value: ['terminal'] }))
   on('session.cwd', () => ({ value: cwd() }))
   on('session.repo', () => ({ value: repoRoot() ? { root: repoRoot() as string, remote: null, internal: false, name: null } : null }))
   on('session.id', () => ({ value: session.id }))

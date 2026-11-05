@@ -10,7 +10,7 @@ Time counts while Claude answers, while the session's background work runs, and 
 
 The project is the git repository the session is working in right now, a worktree counting for its original repository. Outside any repository, it is the folder the session opened in. A session opened in a folder that holds several repositories splits its time between them.
 
-The status line shows the same time as the panel for today's project, corrections included.
+The status line shows the same time as the panel for today's project, corrections included. On the desktop it sits in the line under the prompt as a button that opens and closes the panel; the terminal keeps it as plain text, as a drawn line there would replace Claude's own indicators.
 
 ## The /horas panel
 

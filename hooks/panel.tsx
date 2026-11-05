@@ -71,6 +71,19 @@ export type PanelArgs = {
   onCopy: (surface: RenderSurface) => unknown
 }
 
+/** The line under the prompt on the desktop: Claude's own hint, and the time as a button that opens the panel. */
+export function promptHint(ui: Elements[RenderSurface], hint: string, status: string, onPress: () => unknown): RenderElement {
+  const { Box, Text, Button } = ui
+  return (
+    <Box flexDirection="row" justifyContent="space-between" gap={2}>
+      <Text dimColor>{hint}</Text>
+      <Button key="status-open" plain dimColor onPress={() => void onPress()}>
+        {status}
+      </Button>
+    </Box>
+  )
+}
+
 export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderElement {
   const { roots, surface, columns, view, onView, measure, onMeasure, collapsed, lang, onToggle, paused, onPause, filter, onFilter } = args
   const { range, offset, onOffset, picker, today, workedDays, onOpenPicker, onPickerMonth, onPickDay, onPickMonth } = args

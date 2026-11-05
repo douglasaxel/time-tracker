@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, RenderSurface } from 'claude-code'
 import type { Engine as TestEngine } from 'claude-code/testing'
 
 const at = (h: number, m: number, day = 18) => new Date(2026, 9, day, h, m).getTime()
@@ -11,6 +11,7 @@ const WIN = 'C:\\Users\\dougl\\workstation'
 
 /** The engine beneath the plugin, with panes that open and close. */
 function world(on: On, start: number, store: Record<string, unknown> = {}) {
+  const surfaces = { list: ['terminal'] as RenderSurface[] }
   const clock = mock.clock(on, { now: start })
   const panes = new Set<string>()
   const copied: string[] = []
@@ -19,7 +20,8 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   on('store.set', (_, e) => { store[e.key] = JSON.parse(JSON.stringify(e.value)); return { value: undefined } })
   on('store.delete', (_, e) => { delete store[e.key]; return { value: undefined } })
   on('store.keys', () => ({ value: Object.keys(store) }))
-  on('ui.status', () => ({ value: undefined }))
+  const statuses: (string | undefined)[] = []
+  on('ui.status', (_, e) => { statuses.push(e.text); return { value: undefined } })
   on('ui.panes', () => ({ value: [...panes].map(id => ({ id, title: '', isShown: true, isFocused: false, isPlaced: true })) }))
   on('ui.open', (_, e) => { panes.add(e.id); return { value: { isPlaced: true } } })
   on('ui.close', (_, e) => { panes.delete(e.id); return { value: undefined } })
@@ -29,6 +31,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   })
   on('command.register', () => ({ value: { command: 'horas' } }))
   on('session.root', () => ({ value: `${W}/room/app-a` }))
+  on('session.surfaces', () => ({ value: surfaces.list }))
   on('session.cwd', () => ({ value: `${W}/room/app-a` }))
   on('session.repo', () => ({ value: null }))
   on('session.id', () => ({ value: 'sess-1' }))
@@ -38,7 +41,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   on('prompt.submit', (_, e) => ({ text: e.text }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  return { clock, panes, copied, clipboard }
+  return { clock, panes, copied, clipboard, surfaces, statuses }
 }
 
 /** This session's earlier time, read back on start (a resume). */
@@ -520,4 +523,36 @@ test('terminal: pressing the same day twice picks that one day, and a preset lea
   expect((await sheetRow(ui, 'sheet-total')).at(-1)).toBe('40min')
   await ui.press({ key: 'filter:week' })
   expect((await ui.find({ key: 'period' }))?.text).toContain('Oct 12 to Oct 18')
+})
+
+// ---- the time under the prompt ----
+const hintProps = { isDraft: false, isWorking: false, hint: '? for shortcuts' } as never
+
+test('desktop: the time under the prompt is a button that opens and closes the panel, beside Claude\'s hint', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0), { 'day:2026-10-12': { [`${W}/room/app-a`]: 20 * MIN } })
+  w.surfaces.list = ['desktop']
+  await startSession($)
+  await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'desktop', component: 'PromptHint', props: hintProps })
+  expect((await ui.find({ key: 'status-open' }))?.text).toContain('hoje · app-a')
+  expect((await ui.find({ type: 'Text', text: /for shortcuts/ }))?.text).toBeDefined()
+  expect(w.statuses.at(-1)).toBeUndefined() // not repeated as the plain line
+  await ui.press({ key: 'status-open' })
+  expect([...w.panes]).toEqual([PANE])
+  await ui.press({ key: 'status-open' })
+  expect([...w.panes]).toEqual([])
+})
+
+test('terminal: the line under the prompt stays Claude\'s own, and the time stays in the status line', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return Text({ children: 'engine line' })
+  })
+  await startSession($)
+  await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+  expect(w.statuses.at(-1)).toContain('hoje · app-a')
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'PromptHint', props: hintProps })
+  expect(await ui.find({ key: 'status-open' })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /engine line/ }))?.text).toBeDefined()
 })
