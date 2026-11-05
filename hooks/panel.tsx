@@ -71,12 +71,12 @@ export type PanelArgs = {
   onCopy: (surface: RenderSurface) => unknown
 }
 
-/** The line under the prompt on the desktop: Claude's own hint, and the time as a button that opens the panel. */
-export function promptHint(ui: Elements[RenderSurface], hint: string, status: string, onPress: () => unknown): RenderElement {
+/** The mode labels under the prompt on the desktop, with the time as a button that opens the panel before them. */
+export function sessionModes(ui: Elements[RenderSurface], modes: readonly string[], status: string, onPress: () => unknown): RenderElement {
   const { Box, Text, Button } = ui
   return (
-    <Box flexDirection="row" justifyContent="space-between" gap={2}>
-      <Text dimColor>{hint}</Text>
+    <Box flexDirection="row" gap={1}>
+      {modes.length ? <Text dimColor>{modes.join(' & ')}</Text> : null}
       <Button key="status-open" plain dimColor onPress={() => void onPress()}>
         {status}
       </Button>

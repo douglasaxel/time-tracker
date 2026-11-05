@@ -526,16 +526,16 @@ test('terminal: pressing the same day twice picks that one day, and a preset lea
 })
 
 // ---- the time under the prompt ----
-const hintProps = { isDraft: false, isWorking: false, hint: '? for shortcuts' } as never
+const modeProps = { modes: ['plan'] } as never
 
-test('desktop: the time under the prompt is a button that opens and closes the panel, beside Claude\'s hint', { options: { language: 'pt' } }, async ($, on) => {
+test('desktop: the time under the prompt is a button that opens and closes the panel, beside the mode labels', { options: { language: 'pt' } }, async ($, on) => {
   const w = world(on, at(9, 0), { 'day:2026-10-12': { [`${W}/room/app-a`]: 20 * MIN } })
   w.surfaces.list = ['desktop']
   await startSession($)
   await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
-  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'desktop', component: 'PromptHint', props: hintProps })
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'desktop', component: 'SessionMode', props: modeProps })
   expect((await ui.find({ key: 'status-open' }))?.text).toContain('hoje · app-a')
-  expect((await ui.find({ type: 'Text', text: /for shortcuts/ }))?.text).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /plan/ }))?.text).toBeDefined()
   expect(w.statuses.at(-1)).toBeUndefined() // not repeated as the plain line
   await ui.press({ key: 'status-open' })
   expect([...w.panes]).toEqual([PANE])
@@ -543,16 +543,16 @@ test('desktop: the time under the prompt is a button that opens and closes the p
   expect([...w.panes]).toEqual([])
 })
 
-test('terminal: the line under the prompt stays Claude\'s own, and the time stays in the status line', { options: { language: 'pt' } }, async ($, on) => {
+test('terminal: the footer under the prompt stays Claude\'s own, and the time stays in the status line', { options: { language: 'pt' } }, async ($, on) => {
   const w = world(on, at(9, 0))
-  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+  on('ui.render', { component: 'SessionMode' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
     return Text({ children: 'engine line' })
   })
   await startSession($)
   await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
   expect(w.statuses.at(-1)).toContain('hoje · app-a')
-  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'PromptHint', props: hintProps })
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'SessionMode', props: modeProps })
   expect(await ui.find({ key: 'status-open' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /engine line/ }))?.text).toBeDefined()
 })

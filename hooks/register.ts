@@ -9,7 +9,7 @@ import { applyCorrections, isSameTarget, nextCorrection, parseMinutes } from './
 import { isPortuguese, strings, type Lang } from './i18n'
 import { correctionsKey, dayOfKey, isClosedDayKey, isCorrectionsKey, isEffortKey, isLedgerKey, ledger, merge, mergeAgents, sessionKey } from './ledger'
 import { markdownTable } from './markdown'
-import { panel, promptHint } from './panel'
+import { panel, sessionModes } from './panel'
 import { statusText } from './status'
 import { MIN, dayKey, expire, liveAgentDays, liveDays, period, startManualPause, syncAgents, touch, type Moment } from './time'
 import { buildTree, commonFolder, dayEfforts, dayTotals, folderDays, inPeriod, projectTotals, toSlashes } from './tree'
@@ -123,7 +123,7 @@ async function showStatus($: EngineInterface, m: SessionMeasurement, now: number
   const today = applyCorrections(measuredDays(m), await read($, correctionsAtom))[dayKey(now)]?.[p] ?? 0
   const text = statusText(today, p, lang, await read($, pausedAtom))
   await update($, statusLineAtom, () => text)
-  // The desktop draws it as a button in the line under the prompt, so the plain line would repeat it.
+  // The desktop draws it as a button among the mode labels under the prompt, so the plain line would repeat it.
   $.ui.status((await $.session.surfaces()).includes('desktop') ? undefined : text)
 }
 
@@ -292,11 +292,12 @@ export const register: Register = (on, options) => {
   // The /horas panel: the command toggles the pane; the drawing reads the measurement, so each tick redraws it.
   on('command.run', { command: 'horas' }, async $ => ({ text: (await togglePane($)) ? strings[lang].opened : strings[lang].closed }))
 
-  // The terminal keeps Claude's own line, whose pills a drawn tree would replace, and the plain status line.
-  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+  // Under the prompt, the desktop lets a plugin draw the mode labels, not the hint line.
+  // The terminal keeps its own footer and the plain status line.
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const status = await read($, statusLineAtom)
     if (e.surface !== 'desktop' || !status) return next(e)
-    return promptHint($.ui.resolve(e), e.props.hint, status, () => quiet(togglePane($)))
+    return sessionModes($.ui.resolve(e), e.props.modes, status, () => quiet(togglePane($)))
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
