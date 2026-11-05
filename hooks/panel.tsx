@@ -69,6 +69,8 @@ export type PanelArgs = {
   copy: { ok: boolean; text: string } | null
   /** Copies the shown days' table on the surface the press came from. */
   onCopy: (surface: RenderSurface) => unknown
+  /** Why the store could not be read, when it could not: the panel then shows this session only. */
+  readError?: string
 }
 
 /** The mode labels under the prompt on the desktop, with the time as a button that opens the panel before them. */
@@ -211,6 +213,11 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     <Box key="top" flexDirection="column">
       {head}
       {paused ? <Text color="warning">{s.paused}</Text> : null}
+      {args.readError ? (
+        <Text color="warning">
+          {s.readFailed} {args.readError}
+        </Text>
+      ) : null}
       {controls}
       {totals}
       {calendar}

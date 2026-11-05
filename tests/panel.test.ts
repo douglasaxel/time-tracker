@@ -19,7 +19,11 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   on('store.get', (_, e) => ({ value: store[e.key] }))
   on('store.set', (_, e) => { store[e.key] = JSON.parse(JSON.stringify(e.value)); return { value: undefined } })
   on('store.delete', (_, e) => { delete store[e.key]; return { value: undefined } })
-  on('store.keys', () => ({ value: Object.keys(store) }))
+  const failures = { read: false }
+  on('store.keys', () => {
+    if (failures.read) return { value: null as never } // a store that answers nothing readable
+    return { value: Object.keys(store) }
+  })
   const statuses: (string | undefined)[] = []
   on('ui.status', (_, e) => { statuses.push(e.text); return { value: undefined } })
   on('ui.panes', () => ({ value: [...panes].map(id => ({ id, title: '', isShown: true, isFocused: false, isPlaced: true })) }))
@@ -41,7 +45,7 @@ function world(on: On, start: number, store: Record<string, unknown> = {}) {
   on('prompt.submit', (_, e) => ({ text: e.text }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  return { clock, panes, copied, clipboard, surfaces, statuses }
+  return { clock, panes, copied, clipboard, surfaces, statuses, failures }
 }
 
 /** This session's earlier time, read back on start (a resume). */
@@ -555,4 +559,22 @@ test('terminal: the footer under the prompt stays Claude\'s own, and the time st
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'SessionMode', props: modeProps })
   expect(await ui.find({ key: 'status-open' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /engine line/ }))?.text).toBeDefined()
+})
+
+// ---- reading the store as the panel draws ----
+test('terminal: the panel shows every session and closed day even when no sync ran, as after a reload of the mod', { options: { language: 'pt' } }, async ($, on) => {
+  world(on, at(9, 0), {
+    'day:2026-10-13': { [`${W}/room/app-a`]: 40 * MIN },
+    'session:other': { days: { '2026-10-18': { [`${W}/personal/site`]: [[at(8, 0), at(8, 30)]] } } },
+  })
+  // No session.start: the module's own variables are as a reload leaves them.
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+  expect((await sheetRow(ui, 'sheet-total')).at(-1)).toBe('1h10')
+})
+
+test('terminal: a store that cannot be read says so in the panel', { options: { language: 'en' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  w.failures.read = true
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
+  expect((await ui.find({ type: 'Text', text: /Could not read the other sessions' hours:/ }))?.text).toBeDefined()
 })

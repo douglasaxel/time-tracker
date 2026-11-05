@@ -1,5 +1,5 @@
 // The store across sessions: the union of every session's key, and the compaction of closed days. Pure.
-import type { AgentDays, DayTotals, Days, SessionRecord } from '../types'
+import type { AgentDays, Corrections, DayTotals, Days, SessionRecord } from '../types'
 import { effortTime, total, union } from './time'
 
 /**
@@ -46,6 +46,28 @@ export function mergeAgents(records: readonly unknown[]): AgentDays {
         for (const [p, intervals] of Object.entries(projects)) ((out[d] ??= {})[p] ??= []).push(intervals)
   return out
 }
+
+/** What the store holds besides this session's own key, as the panel and the status line read it. */
+export type StoredView = {
+  others: unknown[]
+  closed: Record<string, DayTotals>
+  closedEfforts: Record<string, DayTotals>
+  corrections: Corrections
+}
+
+/** The store's entries as the panel reads them: the other sessions' records, the closed days, and the corrections. */
+export function storedView(entries: Readonly<Record<string, unknown>>, own: string): StoredView {
+  const byDay = (isKey: (k: string) => boolean) =>
+    Object.fromEntries(Object.entries(entries).filter(([k]) => isKey(k)).map(([k, v]) => [dayOfKey(k), v]))
+  return {
+    others: Object.keys(entries).filter(k => isSessionKey(k) && k !== own).map(k => entries[k]),
+    closed: byDay(isClosedDayKey) as Record<string, DayTotals>,
+    closedEfforts: byDay(isEffortKey) as Record<string, DayTotals>,
+    corrections: byDay(isCorrectionsKey) as Corrections,
+  }
+}
+
+export const emptyView: StoredView = { others: [], closed: {}, closedEfforts: {}, corrections: {} }
 
 /**
  * What one session does with the store's entries (its own key holding its current record): each day

@@ -83,8 +83,8 @@ declare module 'claude-code' {
       selected: string | null
       /** Manual pause of this session: while on, no activity is recorded. */
       paused: boolean
-      /** Every session's corrections, read from the store. */
-      corrections: Corrections
+      /** Raised after the mod writes the store, so the panel, which reads the store as it draws, draws again. */
+      storeRevision: number
       /** The project day whose correction line is open. */
       correcting: CorrectionTarget | null
       /** The last Copy as Markdown: whether the clipboard took it, and the table copied. */
