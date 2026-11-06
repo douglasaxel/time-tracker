@@ -86,6 +86,12 @@ async function detectLang($: EngineInterface, option: unknown): Promise<Lang> {
   }
 }
 
+/**
+ * The repository of the file Claude last wrote in this prompt: a session in one repository may
+ * edit another by its path, with no `cd`. Cleared at each prompt; a module variable, so a reload
+ * mid-prompt falls back to the session's folder.
+ */
+let edited: string | null = null
 const projectOf = new Map<string, string>()
 
 /**
@@ -95,6 +101,7 @@ const projectOf = new Map<string, string>()
  * repository reads the working copy.
  */
 async function project($: EngineInterface): Promise<string> {
+  if (edited) return edited
   const cwd = await $.session.cwd()
   const known = projectOf.get(cwd)
   if (known) return known
@@ -102,6 +109,37 @@ async function project($: EngineInterface): Promise<string> {
   const p = toSlashes(repo?.root ?? (await $.session.root()))
   projectOf.set(cwd, p)
   return p
+}
+
+const repoOf = new Map<string, string | null>()
+
+/** The nearest folder above `file` that holds a `.git`, or null outside any repository. */
+async function fileRepo($: EngineInterface, file: string): Promise<string | null> {
+  let dir = toSlashes(file).replace(/\/[^/]*$/, '')
+  const seen: string[] = []
+  let found: string | null = null
+  while (dir.includes('/')) {
+    if (repoOf.has(dir)) { found = repoOf.get(dir) ?? null; break }
+    seen.push(dir)
+    if (await $.fs.exists(`${dir}/.git`)) { found = dir; break }
+    dir = dir.slice(0, dir.lastIndexOf('/'))
+  }
+  for (const d of seen) repoOf.set(d, found)
+  return found
+}
+
+/** The file a write tool call changes; undefined for any other tool. */
+function writtenPath(e: { tool: string; file_path?: unknown; notebook_path?: unknown }): unknown {
+  switch (e.tool) {
+    case 'Edit':
+    case 'Write':
+    case 'MultiEdit':
+      return e.file_path
+    case 'NotebookEdit':
+      return e.notebook_path
+    default:
+      return undefined
+  }
 }
 
 const momentNow = async ($: EngineInterface): Promise<Moment> => ({ now: await $.clock.now(), project: await project($), inactivityMs })
@@ -260,6 +298,7 @@ export const register: Register = (on, options) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    edited = null
     await quiet(activity($))
     return next(e)
   })
@@ -274,6 +313,19 @@ export const register: Register = (on, options) => {
     const r = yield* next(e)
     await quiet(activity($))
     return r
+  })
+
+  // A write in another repository moves the time there until the next prompt.
+  on('tool.call', async ($, e, next) => {
+    const file = writtenPath(e as never)
+    if (typeof file === 'string') {
+      const repo = await fileRepo($, file).catch(() => null)
+      if (repo && repo !== edited) {
+        edited = repo
+        await quiet(activity($))
+      }
+    }
+    return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {

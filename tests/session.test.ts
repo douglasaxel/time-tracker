@@ -220,6 +220,29 @@ test('a session in a folder that holds repositories splits its time between them
   expect(projectsToday(w.store)).toEqual(['C:/work/quest/api', 'C:/work/quest/front'])
 })
 
+test('a write in another repository moves the time there until the next prompt', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  w.session.root = 'C:/work/pie/lifegenomics'
+  w.session.repos[w.session.root] = w.session.root
+  on('fs.exists', (_, e) => ({ value: e.path.replaceAll('\\', '/') === 'C:/work/pie/genomynd/.git' }))
+  on('tool.call', () => ({ result: 'ok' }) as never)
+  await startSession($)
+  await interact($, w, 't1', 5)
+  await w.clock.advance(MIN)
+  await $.tool.call({ tool: 'Edit', tool_use_id: 'u1', file_path: 'C:\\work\\pie\\genomynd\\src\\a.ts', old_string: 'a', new_string: 'b' } as never)
+  await w.clock.advance(5 * MIN)
+  await $.turn.complete({ answer: 'ok', durationMs: 0, isAborted: false, turnId: 't2', reason: 'answer' })
+  expect(w.status()).toBe('⏱ 0h 05min hoje · genomynd')
+  await w.clock.advance(MIN)
+  await interact($, w, 't3', 2)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 'sess-1', resume: { id: 'sess-1' } })
+  const days = (w.store['session:sess-1'] as { days: Record<string, Record<string, [number, number][]>> }).days['2026-10-18']
+  expect(days).toEqual({
+    'C:/work/pie/lifegenomics': [[at(9, 0), at(9, 6)], [at(9, 12), at(9, 14)]],
+    'C:/work/pie/genomynd': [[at(9, 6), at(9, 12)]],
+  })
+})
+
 const day = (ms: number) => {
   const d = new Date(ms)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
