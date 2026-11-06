@@ -578,3 +578,45 @@ test('terminal: a store that cannot be read says so in the panel', { options: { 
   const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 70 } as never })
   expect((await ui.find({ type: 'Text', text: /Could not read the other sessions' hours:/ }))?.text).toBeDefined()
 })
+
+// ---- the sheet grouped by company ----
+test('terminal: each company shows its total, then its own folder and its systems, the companies by time', { options: { language: 'pt' } }, async ($, on) => {
+  const Q = `${W}/room/MesaQuest`
+  const C = `${W}/freela/condozen`
+  world(on, at(9, 0), {
+    'day:2026-10-13': {
+      [Q]: 60 * MIN,
+      [`${Q}/MesaQuest-API`]: 90 * MIN,
+      [`${Q}/MesaQuest-Front`]: 30 * MIN,
+      [`${C}/condozen-api`]: 50 * MIN,
+      [`${C}/condozen-front`]: 20 * MIN,
+      [`${W}/personal/time-tracker`]: 100 * MIN,
+    },
+  })
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'terminal', component: 'Pane', requestId: PANE, props: { bodyColumns: 80 } as never })
+  const lines = (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('sheet-group:') || b.key?.startsWith('sheet:'))
+  const read = lines.map(b => [b.key?.split(':')[0], b.text.trim().split(/\s{2,}/)[0], b.text.trim().split(/\s+/).at(-1)])
+  expect(read).toEqual([
+    ['sheet-group', 'MesaQuest', '3h00'],
+    ['sheet', '(pasta)', '1h00'],
+    ['sheet', 'API', '1h30'],
+    ['sheet', 'Front', '30min'],
+    ['sheet', 'time-tracker', '1h40'],
+    ['sheet-group', 'condozen', '1h10'],
+    ['sheet', 'api', '50min'],
+    ['sheet', 'front', '20min'],
+  ])
+  expect((await sheetRow(ui, 'sheet-total')).at(-1)).toBe('5h50')
+})
+
+test('desktop: a company row is drawn in bold over its indented systems', { options: { language: 'pt' } }, async ($, on) => {
+  const Q = `${W}/room/MesaQuest`
+  world(on, at(9, 0), { 'day:2026-10-13': { [Q]: 60 * MIN, [`${Q}/MesaQuest-API`]: 90 * MIN } })
+  await startSession($)
+  const ui = await $.ui.mount({ plugin: 'time-tracker', surface: 'desktop', component: 'Pane', requestId: PANE, props: { bodyColumns: 60 } as never })
+  const [sheet] = (await ui.findAll({ type: 'Svg' })) as unknown as { props: { source: string } }[]
+  expect(sheet?.props.source).toContain('class="t b" x="0.0"')
+  expect(sheet?.props.source).toMatch(/x="12\.0"[^>]*>\(pasta\)</)
+  expect(sheet?.props.source).toMatch(/x="12\.0"[^>]*>API</)
+})

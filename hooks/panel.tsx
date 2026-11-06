@@ -276,7 +276,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
     )
   }
 
-  const sheet = buildSheet(sheetColumns(filter, range, days, lang), days, measure)
+  const sheet = buildSheet(sheetColumns(filter, range, days, lang), days, measure, lang)
   const width = Math.max(240, Math.min(900, columns * 8 - 8))
   const alt = sheet.rows.map(r => `${r.name}: ${formatDuration(r.total)}`).join(', ')
   const table =
@@ -286,7 +286,7 @@ export function panel(ui: Elements[RenderSurface], args: PanelArgs): RenderEleme
       <Box key="sheet" flexDirection="column">
         {sheetLines(sheet, columns, lang).map(l => (
           <Box key={l.key}>
-            <Text bold={l.key === 'sheet-total'} dimColor={l.key === 'sheet-head' || l.key === 'sheet-sub'} wrap="truncate-end">
+            <Text bold={l.key === 'sheet-total' || l.key.startsWith('sheet-group:')} dimColor={l.key === 'sheet-head' || l.key === 'sheet-sub'} wrap="truncate-end">
               {l.text}
             </Text>
           </Box>

@@ -2,10 +2,12 @@
 import type { Filter, Measure } from '../types'
 import { dayLabel, strings, weekday, type Lang } from './i18n'
 import { MIN, dayKey } from './time'
-import { displayPath, folderName, type Entry, type FolderDay } from './tree'
+import { displayPath, folderName, relativeName, type Entry, type FolderDay } from './tree'
 
 type SheetColumn = { from: string; to: string; head: string; sub: string }
-type SheetRow = { project: string; name: string; cells: number[]; corrected: boolean[]; total: number }
+/** A company's own row (`group`), one of its systems (`member`), or a project on its own (`single`). */
+type RowKind = 'group' | 'member' | 'single'
+type SheetRow = { project: string; name: string; cells: number[]; corrected: boolean[]; total: number; kind: RowKind }
 type Sheet = { columns: SheetColumn[]; rows: SheetRow[]; totals: number[]; total: number }
 
 /** Time as a cell reads it: `13h02`, `48min`. Minutes are never rounded up. */
@@ -86,14 +88,47 @@ function projectNames(projects: readonly string[]): Map<string, string> {
   )
 }
 
-/** The period's sheet in the chosen time: the projects with the most time first, a total per row and per column. */
-export function buildSheet(columns: SheetColumn[], days: readonly FolderDay[], measure: Measure): Sheet {
+const parentOf = (p: string) => p.slice(0, p.lastIndexOf('/'))
+
+/** A system as its company's group names it: `MesaQuest-API` under MesaQuest reads `API`. */
+function systemName(project: string, company: string): string {
+  const name = relativeName(project, company)
+  const prefix = `${folderName(company)}-`.toLowerCase()
+  return name.toLowerCase().startsWith(prefix) && name.length > prefix.length ? name.slice(prefix.length) : name
+}
+
+/**
+ * Each project's company: the folder that holds a company's systems. A project whose folder holds
+ * other projects is its company's folder; a project inside one belongs to it, and so do two or more
+ * projects side by side in one folder, though that folder has no time of its own. Any other project
+ * stands alone (no company).
+ */
+function companies(projects: readonly string[]): Map<string, string | null> {
+  const children = new Map<string, number>()
+  for (const p of projects) children.set(parentOf(p), (children.get(parentOf(p)) ?? 0) + 1)
+  const isCompany = (folder: string) => (children.get(folder) ?? 0) > (projects.includes(folder) ? 0 : 1)
+  const companyOf = (p: string) => {
+    if (isCompany(p)) return p
+    if (isCompany(parentOf(p))) return parentOf(p)
+    return null
+  }
+  return new Map(projects.map(p => [p, companyOf(p)]))
+}
+
+/**
+ * The period's sheet in the chosen time, grouped by company: each company's total, then its own
+ * folder's time and its systems, the most time first; a total per row and per column.
+ */
+export function buildSheet(columns: SheetColumn[], days: readonly FolderDay[], measure: Measure, lang: Lang): Sheet {
   const timeOf = (e: Entry) => (measure === 'effort' ? e.effort : e.ms)
   const totalsByProject = new Map<string, number>()
   for (const d of days) for (const e of d.entries) totalsByProject.set(e.project, (totalsByProject.get(e.project) ?? 0) + timeOf(e))
-  const projects = [...totalsByProject.keys()].sort((a, b) => (totalsByProject.get(b) ?? 0) - (totalsByProject.get(a) ?? 0) || a.localeCompare(b))
-  const names = projectNames(projects)
-  const rows = projects.map((project): SheetRow => {
+  const byTime = (a: { total: number; project: string }, b: { total: number; project: string }) => b.total - a.total || a.project.localeCompare(b.project)
+  const projects = [...totalsByProject.keys()]
+  const companyOf = companies(projects)
+  const leaders = [...new Set(projects.map(p => companyOf.get(p) ?? p))]
+  const names = projectNames(leaders)
+  const rowOf = (project: string): SheetRow => {
     const cells = columns.map(() => 0)
     const corrected = columns.map(() => false)
     for (const d of days) {
@@ -103,10 +138,34 @@ export function buildSheet(columns: SheetColumn[], days: readonly FolderDay[], m
       cells[i] = (cells[i] ?? 0) + timeOf(e)
       corrected[i] = corrected[i] || e.corrected
     }
-    return { project, name: names.get(project) ?? project, cells, corrected, total: totalsByProject.get(project) ?? 0 }
+    return { project, name: names.get(project) ?? project, cells, corrected, total: totalsByProject.get(project) ?? 0, kind: 'single' }
+  }
+  const projectRows = projects.map(rowOf)
+  const blocks = leaders.map(leader => {
+    const members = projectRows.filter(r => (companyOf.get(r.project) ?? r.project) === leader)
+    const total = members.reduce((n, r) => n + r.total, 0)
+    // null: a project on its own (a company folder with no time of its own is undefined).
+    if (companyOf.get(leader) === null) return { project: leader, total, rows: members }
+    const own = members.filter(r => r.project === leader)
+    const systems = members.filter(r => r.project !== leader).sort(byTime)
+    const group: SheetRow = {
+      project: leader,
+      name: names.get(leader) ?? folderName(leader),
+      cells: columns.map((_, i) => members.reduce((n, r) => n + (r.cells[i] ?? 0), 0)),
+      corrected: columns.map((_, i) => members.some(r => r.corrected[i])),
+      total,
+      kind: 'group',
+    }
+    const member = (r: SheetRow, name: string): SheetRow => ({ ...r, name, kind: 'member' })
+    const named = [
+      ...own.map(r => member(r, strings[lang].ownFolder)),
+      ...systems.map(r => member(r, displayPath(systemName(r.project, leader), r.project))),
+    ]
+    return { project: leader, total, rows: [group, ...named] }
   })
-  const totals = columns.map((_, i) => rows.reduce((n, r) => n + (r.cells[i] ?? 0), 0))
-  return { columns, rows, totals, total: rows.reduce((n, r) => n + r.total, 0) }
+  const rows = blocks.sort(byTime).flatMap(b => b.rows)
+  const totals = columns.map((_, i) => projectRows.reduce((n, r) => n + (r.cells[i] ?? 0), 0))
+  return { columns, rows, totals, total: projectRows.reduce((n, r) => n + r.total, 0) }
 }
 
 const xml = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c)
@@ -120,7 +179,7 @@ export const sheetHeight = (s: Sheet) => HEAD_H + ROW_H * (s.rows.length + 1)
 /** The sheet as one drawing: the more time in a cell, the stronger its blue. */
 export function sheetSvg(s: Sheet, width: number, lang: Lang): string {
   const totalW = 54
-  const nameW = Math.min(112, Math.round(width * 0.25))
+  const nameW = Math.min(140, Math.round(width * 0.3))
   const cellW = (width - nameW - totalW) / Math.max(1, s.columns.length)
   const cellX = (i: number) => nameW + cellW * i
   const cellMid = (i: number) => cellX(i) + cellW / 2
@@ -137,15 +196,22 @@ export function sheetSvg(s: Sheet, width: number, lang: Lang): string {
     .map((r, ri) => {
       const y = HEAD_H + ROW_H * ri
       const mid = y + ROW_H / 2 + 4
+      const strong = r.kind === 'group' ? ' b' : ''
       const cells = r.cells
         .map((ms, i) => {
           const label = cellText(ms, r.corrected[i])
           if (ms <= 0 && !r.corrected[i]) return text(cellMid(i), mid, label, 'm')
           const alpha = Math.min(0.75, 0.1 + ms / MIN / 900).toFixed(2)
-          return `<rect x="${cellX(i).toFixed(1)}" y="${y + 1}" width="${cellW.toFixed(1)}" height="${ROW_H - 1}" fill="#7fb2e5" fill-opacity="${alpha}"/>${text(cellMid(i), mid, label, 't')}`
+          return `<rect x="${cellX(i).toFixed(1)}" y="${y + 1}" width="${cellW.toFixed(1)}" height="${ROW_H - 1}" fill="#7fb2e5" fill-opacity="${alpha}"/>${text(cellMid(i), mid, label, `t${strong}`)}`
         })
         .join('')
-      return line(y) + text(0, mid, clip(r.name, maxChars), 't', 'start', 12.5) + cells + text(width, mid, cellTime(r.total), 't b', 'end')
+      const indent = r.kind === 'member' ? 12 : 0
+      return (
+        (r.kind === 'member' ? '' : line(y)) +
+        text(indent, mid, clip(r.name, maxChars - indent / 6), `t${strong}`, 'start', 12.5) +
+        cells +
+        text(width, mid, cellTime(r.total), 't b', 'end')
+      )
     })
     .join('')
   const footY = HEAD_H + ROW_H * s.rows.length
@@ -162,14 +228,14 @@ export function sheetSvg(s: Sheet, width: number, lang: Lang): string {
 export function sheetLines(s: Sheet, columns: number, lang: Lang): { key: string; text: string }[] {
   const cell = 6
   const totalW = 7
-  const nameW = Math.max(6, Math.min(16, columns - totalW - cell * s.columns.length))
+  const nameW = Math.max(6, Math.min(20, columns - totalW - cell * s.columns.length))
   const line = (label: string, cells: string[], total: string) => `${clip(label, nameW).padEnd(nameW)}${cells.map(c => c.padStart(cell)).join('')}${total.padStart(totalW)}`
   return [
     { key: 'sheet-head', text: line('', s.columns.map(c => c.head), strings[lang].total) },
     ...(s.columns.some(c => c.sub) ? [{ key: 'sheet-sub', text: line('', s.columns.map(c => c.sub), '') }] : []),
     ...s.rows.map(r => ({
-      key: `sheet:${r.project}`,
-      text: line(r.name, r.cells.map((ms, i) => cellText(ms, r.corrected[i])), cellTime(r.total)),
+      key: r.kind === 'group' ? `sheet-group:${r.project}` : `sheet:${r.project}`,
+      text: line(r.kind === 'member' ? `  ${r.name}` : r.name, r.cells.map((ms, i) => cellText(ms, r.corrected[i])), cellTime(r.total)),
     })),
     { key: 'sheet-total', text: line(strings[lang].total, s.totals.map(ms => cellText(ms)), cellTime(s.total)) },
   ]
