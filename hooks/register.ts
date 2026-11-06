@@ -113,7 +113,7 @@ async function project($: EngineInterface): Promise<string> {
 
 const repoOf = new Map<string, string | null>()
 
-/** The nearest folder above `file` that holds a `.git`, or null outside any repository. */
+/** The nearest folder above `file` that holds a `.git` (for a worktree, its original repository), or null outside any repository. */
 async function fileRepo($: EngineInterface, file: string): Promise<string | null> {
   let dir = toSlashes(file).replace(/\/[^/]*$/, '')
   const seen: string[] = []
@@ -121,11 +121,18 @@ async function fileRepo($: EngineInterface, file: string): Promise<string | null
   while (dir.includes('/')) {
     if (repoOf.has(dir)) { found = repoOf.get(dir) ?? null; break }
     seen.push(dir)
-    if (await $.fs.exists(`${dir}/.git`)) { found = dir; break }
+    if (await $.fs.exists(`${dir}/.git`)) { found = await mainTree($, dir); break }
     dir = dir.slice(0, dir.lastIndexOf('/'))
   }
   for (const d of seen) repoOf.set(d, found)
   return found
+}
+
+/** A worktree's original repository, read from its `.git` file (`gitdir: <repo>/.git/worktrees/<name>`); any other folder as is. */
+async function mainTree($: EngineInterface, dir: string): Promise<string> {
+  const git = String(await $.fs.read(`${dir}/.git`).catch(() => ''))
+  const main = /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/]/m.exec(git)?.[1]
+  return main ? toSlashes(main) : dir
 }
 
 /** The file a write tool call changes; undefined for any other tool. */

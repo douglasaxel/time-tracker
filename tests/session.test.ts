@@ -243,6 +243,21 @@ test('a write in another repository moves the time there until the next prompt',
   })
 })
 
+test('a write in a worktree counts for its original repository', { options: { language: 'pt' } }, async ($, on) => {
+  const w = world(on, at(9, 0))
+  w.session.root = 'C:/work/pie/lifegenomics'
+  const wt = 'C:/work/pie/worktrees/genomynd-api-x'
+  on('fs.exists', (_, e) => ({ value: e.path.replaceAll('\\', '/') === `${wt}/.git` }))
+  on('fs.read', (_, e) => ({ value: e.path.replaceAll('\\', '/') === `${wt}/.git` ? 'gitdir: C:/work/pie/genomynd/genomynd-api/.git/worktrees/genomynd-api-x\n' : '' }))
+  on('tool.call', () => ({ result: 'ok' }) as never)
+  await startSession($)
+  await interact($, w, 't1', 2)
+  await $.tool.call({ tool: 'Write', tool_use_id: 'u1', file_path: `${wt}/src/a.ts`, content: 'b' } as never)
+  await w.clock.advance(3 * MIN)
+  await $.turn.complete({ answer: 'ok', durationMs: 0, isAborted: false, turnId: 't2', reason: 'answer' })
+  expect(w.status()).toBe('⏱ 0h 03min hoje · genomynd-api')
+})
+
 const day = (ms: number) => {
   const d = new Date(ms)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
